@@ -9,8 +9,8 @@ use std::{
     ffi::c_void,
     sync::{Arc, Mutex},
 };
+use tracing::info;
 
-use log::info;
 use mssf_core::{
     runtime::{
         executor::{DefaultExecutor, Executor},

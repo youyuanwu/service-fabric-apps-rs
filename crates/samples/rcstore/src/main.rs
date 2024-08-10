@@ -4,7 +4,6 @@
 // license information.
 // ------------------------------------------------------------
 
-use log::info;
 use mssf_core::{
     debug::wait_for_debugger,
     runtime::{
@@ -13,6 +12,7 @@ use mssf_core::{
     },
 };
 use sfrc_core::wrap::ReliableCollectionRuntime;
+use tracing::info;
 use windows_core::HSTRING;
 
 use crate::rcstore::Factory;
@@ -33,7 +33,7 @@ fn has_debug_arg() -> bool {
 }
 
 fn main() -> windows::core::Result<()> {
-    env_logger::init();
+    tracing_subscriber::fmt().init();
     info!("main start");
     if has_debug_arg() {
         wait_for_debugger();

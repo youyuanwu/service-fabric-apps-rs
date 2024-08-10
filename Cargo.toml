@@ -10,7 +10,8 @@ members = [
 mssf-com = {version = "0.0.8"}
 mssf-core = "0.0.8"
 windows = {version = "0.57", features = [ "Win32_Foundation" ]}
-windows-core = { version = "0.57" }
+windows-core = "0.57"
+windows-bindgen = "0.57"
 tracing = { version = "0.1.40", features = ["log"] }
 tracing-subscriber = { version = "0.3.18",  default-features = false, features = ["fmt"]}
 trait-variant = "0.1.1"

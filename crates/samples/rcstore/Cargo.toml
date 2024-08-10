@@ -10,8 +10,8 @@ name = "rccli"
 path = "rccli/main.rs"
 
 [dependencies]
-log = "*"
-env_logger = "*"
+tracing.workspace = true
+tracing-subscriber.workspace = true
 tokio.workspace = true
 windows-core.workspace = true
 windows.workspace = true
