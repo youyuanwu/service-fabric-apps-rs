@@ -776,6 +776,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "mssf-rplctr"
+version = "0.1.0"
+dependencies = [
+ "bytes",
+ "mssf-core",
+ "mssf-ext",
+]
+
+[[package]]
 name = "multimap"
 version = "0.10.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
