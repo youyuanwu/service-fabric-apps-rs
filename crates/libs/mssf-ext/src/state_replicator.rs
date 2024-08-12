@@ -1,5 +1,5 @@
 use mssf_com::FabricRuntime::{IFabricOperationData, IFabricStateReplicator2};
-use mssf_core::runtime::store_types::ReplicatorSettings;
+use mssf_core::{runtime::store_types::ReplicatorSettings, sync::fabric_begin_end_proxy};
 
 use crate::{
     data::OperationDataBridge,
@@ -26,22 +26,14 @@ impl StateReplicator for StateReplicatorProxy {
         operation_data: impl OperationData,
         sequence_number: &mut i64,
     ) -> mssf_core::Result<i64> {
-        let (tx, rx) = tokio::sync::oneshot::channel();
-        let com_cp = self.com_impl.clone();
-        let callback = mssf_core::sync::AwaitableCallback2::i_new(move |ctx| {
-            let res = unsafe { com_cp.EndReplicate(ctx) };
-            if tx.send(res).is_err() {
-                debug_assert!(false, "Receiver is dropped.");
-            }
-        });
-
         let data_bridge: IFabricOperationData = OperationDataBridge::new(operation_data).into();
-
-        let _ = unsafe {
-            self.com_impl
-                .BeginReplicate(&data_bridge, &callback, sequence_number)?
-        };
-        rx.await.unwrap()
+        let com1 = &self.com_impl;
+        let com2 = self.com_impl.clone();
+        let rx = fabric_begin_end_proxy(
+            move |callback| unsafe { com1.BeginReplicate(&data_bridge, callback, sequence_number) },
+            move |ctx| unsafe { com2.EndReplicate(ctx) },
+        );
+        rx.await
     }
     fn get_replication_stream(&self) -> mssf_core::Result<impl OperationStream> {
         let s = unsafe { self.com_impl.GetReplicationStream() }?;

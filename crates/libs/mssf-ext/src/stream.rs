@@ -9,7 +9,7 @@ use mssf_com::{
 };
 use mssf_core::{
     runtime::executor::Executor,
-    sync::{fabric_begin_bridge, fabric_end_bridge},
+    sync::{fabric_begin_bridge, fabric_begin_end_proxy, fabric_end_bridge},
 };
 use windows_core::{implement, Interface};
 
@@ -108,20 +108,13 @@ impl OperationDataStreamProxy {
 impl OperationDataStream for OperationDataStreamProxy {
     async fn get_next(&self) -> mssf_core::Result<Option<impl OperationData>> {
         // get the data from com
-        let (tx, rx) = tokio::sync::oneshot::channel();
-        let com_cp = self.com_impl.clone();
-        let callback = mssf_core::sync::AwaitableCallback2::i_new(move |ctx| {
-            // This is a special api where next can be null. windows-rs will make a empty error.
-            // See windows_core::Type::from_abi(result__) impl.
-            let res = unsafe { com_cp.EndGetNext(ctx) };
-            // empty error is handled at the rx location
-            if tx.send(res).is_err() {
-                debug_assert!(false, "Receiver is dropped.");
-            }
-        });
-
-        let _ = unsafe { self.com_impl.BeginGetNext(&callback)? };
-        let res = rx.await.unwrap();
+        let com1 = &self.com_impl;
+        let com2 = self.com_impl.clone();
+        let rx = fabric_begin_end_proxy(
+            move |callback| unsafe { com1.BeginGetNext(callback) },
+            move |ctx| unsafe { com2.EndGetNext(ctx) },
+        );
+        let res = rx.await;
         match res {
             Ok(data) => {
                 let proxy = OperationDataProxy::new(data)?;
@@ -152,16 +145,13 @@ impl OperationStreamProxy {
 
 impl OperationStream for OperationStreamProxy {
     async fn get_operation(&self) -> mssf_core::Result<Option<impl Operation>> {
-        let (tx, rx) = tokio::sync::oneshot::channel();
-        let com_cp = self.com_impl.clone();
-        let callback = mssf_core::sync::AwaitableCallback2::i_new(move |ctx| {
-            let res = unsafe { com_cp.EndGetOperation(ctx) };
-            if tx.send(res).is_err() {
-                debug_assert!(false, "Receiver is dropped.");
-            }
-        });
-        let _ = unsafe { self.com_impl.BeginGetOperation(&callback)? };
-        let res = rx.await.unwrap();
+        let com1 = &self.com_impl;
+        let com2 = self.com_impl.clone();
+        let rx = fabric_begin_end_proxy(
+            move |callback| unsafe { com1.BeginGetOperation(callback) },
+            move |ctx| unsafe { com2.EndGetOperation(ctx) },
+        );
+        let res = rx.await;
         match res {
             Ok(op) => {
                 let proxy = OperationProxy::new(op);
