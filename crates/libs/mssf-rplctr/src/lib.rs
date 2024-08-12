@@ -1,5 +1,6 @@
 // replicator impl
 
+pub mod rpc;
 pub mod rplctr;
 
 // use mssf_core::runtime::stateful::PrimaryReplicator;

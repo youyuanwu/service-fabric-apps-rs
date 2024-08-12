@@ -782,6 +782,10 @@ dependencies = [
  "bytes",
  "mssf-core",
  "mssf-ext",
+ "prost",
+ "prost-build",
+ "tonic",
+ "tonic-build",
 ]
 
 [[package]]

@@ -1,0 +1,27 @@
+// ------------------------------------------------------------
+// Copyright (c) Microsoft Corporation.  All rights reserved.
+// Licensed under the MIT License (MIT). See License in the repo root for
+// license information.
+// ------------------------------------------------------------
+
+syntax = "proto3";
+
+package rplctr_rpc;
+
+message empty_payload{}
+
+message operation_request{
+  bytes data = 1;
+  int32 sn = 2;
+}
+
+message operation_response{
+  int32 sn = 1;
+  bool ack = 2;
+}
+
+service rplctr_service {
+  // primary send data to secondary
+  // primary uses the client and secondary is the server
+  rpc replicate(stream operation_request) returns (operation_response){}
+}
