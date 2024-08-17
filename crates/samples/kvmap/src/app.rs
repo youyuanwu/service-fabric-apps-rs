@@ -60,10 +60,10 @@ impl KvApp {
         sr: &StateReplicatorProxy,
         data: String,
     ) -> std::io::Result<i64> {
-        let mut out = 0_i64;
         let buf = OperationDataBuf::new(Bytes::from(data.clone()));
-        let sn = sr.replicate(buf, &mut out).await.unwrap();
-        assert_eq!(out, sn);
+        let (sn, fu) = sr.replicate(buf);
+        let sn2 = fu.await.unwrap();
+        assert_eq!(sn, sn2);
         self.set_data(sn, data.clone()).await.unwrap();
         Ok(sn)
     }

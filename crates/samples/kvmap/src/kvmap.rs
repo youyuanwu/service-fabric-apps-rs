@@ -23,8 +23,8 @@ use mssf_ext::{
     state_provider::StateProviderBridge,
     state_replicator::StateReplicatorProxy,
     traits::{
-        LocalOperationStream, LocalStateReplicator, Operation, OperationData, OperationDataStream,
-        StateProvider,
+        LocalOperationStream, Operation, OperationData, OperationDataStream, StateProvider,
+        StateReplicator,
     },
 };
 use serde::{Deserialize, Serialize};

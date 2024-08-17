@@ -8,6 +8,7 @@ use mssf_core::{
         stateful_types::{Epoch, ReplicaInfo, ReplicaSetConfig, ReplicaSetQuarumMode},
         store_types::ReplicatorSettings,
     },
+    sync::FabricReceiver,
     types::ReplicaRole,
     HSTRING,
 };
@@ -111,11 +112,10 @@ impl<T: StateProvider> PrimaryReplicator for Rplctr<T> {
 
 impl<T: StateProvider> StateReplicator for StRplctr<T> {
     // called on primary to send quorum data to secondary
-    async fn replicate(
+    fn replicate(
         &self,
         _operation_data: impl OperationData,
-        _sequence_number: &mut i64,
-    ) -> mssf_core::Result<i64> {
+    ) -> (i64, FabricReceiver<mssf_core::Result<i64>>) {
         todo!()
     }
 

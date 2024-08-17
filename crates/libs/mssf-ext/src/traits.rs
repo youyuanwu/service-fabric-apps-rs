@@ -1,5 +1,8 @@
 use bytes::Buf;
-use mssf_core::runtime::{stateful_types::Epoch, store_types::ReplicatorSettings};
+use mssf_core::{
+    runtime::{stateful_types::Epoch, store_types::ReplicatorSettings},
+    sync::FabricReceiver,
+};
 
 use crate::types::OperationMetadata;
 
@@ -70,26 +73,26 @@ pub trait LocalStateProvider: Sync + 'static {
 
 /// Exposes replication related functions of the FabricReplicator class that are
 /// used by StateProvider to replicate state to ensure high availability.
-#[trait_variant::make(StateReplicator: Send)]
-pub trait LocalStateReplicator {
+pub trait StateReplicator {
     /// Replicates state changes from Primary replica to the Secondary replicas
     /// and receives a quorum acknowledgement that those state changes have been applied.
     ///
     /// TODO: figure out cancellation.
     /// Parameters:
     /// operationData - Represents the state change that the Primary replica wants to replicate.
-    /// sequenceNumber - Long, the LSN of the operation. Note that this is the same value which is returned by the task.
-    ///   Providing it as an out parameter is useful for services which want to prepare the local write to commit when the task finishes.
     /// cancellationToken - A write quorum of replicas that have been lost.
     ///   It can be used to send a notification that the operation should be canceled.
     ///   Note that cancellation is advisory and that the operation might still be completed even if it is canceled.
     /// Returns:
+    /// sequenceNumber - Long, the LSN of the operation. Note that this is the same value which is returned by the task.
+    ///   Providing it as an out parameter is useful for services which want to prepare the local write to commit when the task finishes.
     /// Returns completable future of type long, the LSN of the operation.
-    async fn replicate(
+    /// Remarks:
+    /// This is a special fn signature because the sn needs to be returned immediately. The future is returned as a receiver.
+    fn replicate(
         &self,
         operation_data: impl OperationData,
-        sequence_number: &mut i64,
-    ) -> mssf_core::Result<i64>;
+    ) -> (i64, FabricReceiver<mssf_core::Result<i64>>);
 
     /// Gets replication stream.
     /// Returns:
