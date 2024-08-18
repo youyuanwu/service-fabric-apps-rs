@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::sync::{atomic::AtomicI64, Arc};
 
 use bytes::{Buf, BytesMut};
 use mssf_core::{
@@ -30,11 +30,17 @@ impl<T: StateProvider> RplctrInner<T> {
 
 pub struct StRplctr<T: StateProvider> {
     _inner: Arc<RplctrInner<T>>,
+    next_sn: AtomicI64,
 }
 
 impl<T: StateProvider> StRplctr<T> {
-    fn new(inner: Arc<RplctrInner<T>>) -> Self {
-        Self { _inner: inner }
+    fn new(inner: Arc<RplctrInner<T>>) -> mssf_core::Result<Self> {
+        // TODO: may need to store it independent of the provider.
+        let curr_sn = inner.state_prov.get_last_committed_sequence_number()?;
+        Ok(Self {
+            _inner: inner,
+            next_sn: AtomicI64::new(curr_sn + 1),
+        })
     }
 }
 
@@ -43,7 +49,10 @@ pub struct Rplctr<T: StateProvider> {
 }
 
 impl<T: StateProvider> Rplctr<T> {
-    pub fn new(state_prov: T, rt: DefaultExecutor) -> (Self, impl StateReplicator) {
+    pub fn new(
+        state_prov: T,
+        rt: DefaultExecutor,
+    ) -> (Self, mssf_core::Result<impl StateReplicator>) {
         let inner = Arc::new(RplctrInner::new(state_prov, rt));
         let st_rplctr = StRplctr::new(inner.clone());
         (Self { inner }, st_rplctr)

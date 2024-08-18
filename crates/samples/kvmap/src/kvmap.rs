@@ -75,6 +75,7 @@ pub struct ReplicaState {
 
 impl ReplicaState {
     fn create() -> Self {
+        // TODO: need to read sn from disk?
         Self {
             lsn: Arc::new(std::sync::Mutex::new(Cell::new(0))),
             app: Arc::new(KvApp::create()),
