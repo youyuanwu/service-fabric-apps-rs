@@ -4,7 +4,7 @@
 // license information.
 // ------------------------------------------------------------
 
-#[allow(
+#![allow(
     non_camel_case_types,
     non_snake_case,
     non_upper_case_globals,
@@ -15,4 +15,5 @@
     clippy::useless_transmute,
     clippy::unused_unit
 )]
-pub mod Microsoft;
+mod FabricCommon;
+pub mod ReliableCollectionRuntime;

@@ -6,6 +6,7 @@ publish = false
 
 [dependencies]
 windows-core = "0.57"
+mssf-com.workspace = true
 
 [dependencies.windows]
 version = "0.57"

@@ -1,0 +1,6 @@
+--typeImport
+# ServiceFabric base
+IFabricAsyncOperationContext(interface)=<Microsoft.ServiceFabric, Version=255.255.255.255, Culture=neutral, PublicKeyToken=null>Microsoft.ServiceFabric.FabricCommon.IFabricAsyncOperationContext
+IFabricAsyncOperationCallback(interface)=<Microsoft.ServiceFabric, Version=255.255.255.255, Culture=neutral, PublicKeyToken=null>Microsoft.ServiceFabric.FabricCommon.IFabricAsyncOperationCallback
+--memberRemap
+^IFabric\w+$=[Agile]

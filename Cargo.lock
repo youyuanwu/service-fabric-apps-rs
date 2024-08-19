@@ -1180,6 +1180,7 @@ dependencies = [
 name = "sfrc-c"
 version = "0.0.0"
 dependencies = [
+ "mssf-com",
  "windows",
  "windows-core",
 ]

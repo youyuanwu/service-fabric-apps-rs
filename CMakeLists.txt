@@ -6,8 +6,8 @@ if(WIN32)
 message(STATUS "fetching fabric_metadata")
 include(FetchContent)
 FetchContent_Declare(fabric_metadata
-    GIT_REPOSITORY https://github.com/youyuanwu/fabric-metadata.git
-    GIT_TAG b070db62d2323d85d402ca3f6dc387f0ce0be37b
+    GIT_REPOSITORY https://github.com/youyuanwu/service-fabric-metadata-fork.git
+    GIT_TAG 086c7b6b2fb65fcef1fab5cd04cbadd24a595b47
 )
 FetchContent_GetProperties(fabric_metadata)
 if(NOT fabric_metadata_POPULATED)
@@ -65,6 +65,7 @@ find_program (
 
 add_custom_target(generate_rust
   COMMAND ${cargo_exe} run -p tools_api
+  COMMAND ${cargo_exe} fmt -p sfrc-c # format the generated crate
   WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
   DEPENDS generate_winmd
 )

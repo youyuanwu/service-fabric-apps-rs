@@ -1,5 +1,6 @@
 #include "windows.h"
 #include "ole2.h"
+#include "FabricCommon.h"
 
 // some internal definition needed for this lib to work
 
@@ -8,11 +9,11 @@ IFabricDataLossHandler : public IUnknown
 {
 public:
     virtual HRESULT STDMETHODCALLTYPE BeginOnDataLoss( 
-        /* [in] */ void *callback,
-        /* [retval][out] */ void **context) = 0;
+        /* [in] */ IFabricAsyncOperationCallback *callback,
+        /* [retval][out] */ IFabricAsyncOperationContext **context) = 0;
     
     virtual HRESULT STDMETHODCALLTYPE EndOnDataLoss( 
-        /* [in] */ void *context,
+        /* [in] */ IFabricAsyncOperationContext *context,
         /* [retval][out] */ BOOLEAN *isStateChanged) = 0;
     
 };

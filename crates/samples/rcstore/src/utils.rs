@@ -6,11 +6,8 @@
 
 use mssf_com::FabricCommon::{IFabricAsyncOperationCallback, IFabricAsyncOperationContext};
 use mssf_core::sync::wait::AsyncContext;
-use sfrc_c::Microsoft::ServiceFabric::ReliableCollectionRuntime::{
-    IFabricDataLossHandler, IFabricDataLossHandler_Impl,
-};
+use sfrc_c::ReliableCollectionRuntime::{IFabricDataLossHandler, IFabricDataLossHandler_Impl};
 use windows::core::implement;
-use windows_core::Interface;
 
 // dummy handler
 #[derive(Debug)]
@@ -20,23 +17,19 @@ pub struct DataLossHandler {}
 impl IFabricDataLossHandler_Impl for DataLossHandler {
     fn BeginOnDataLoss(
         &self,
-        callback: *mut ::core::ffi::c_void,
-        context: *mut *mut ::core::ffi::c_void,
-    ) -> ::windows_core::Result<()> {
-        let callback =
-            unsafe { IFabricAsyncOperationCallback::from_raw_borrowed(&callback) }.unwrap();
-        let ctx: IFabricAsyncOperationContext = AsyncContext::new(Some(callback)).into();
+        callback: Option<&IFabricAsyncOperationCallback>,
+    ) -> windows_core::Result<IFabricAsyncOperationContext> {
+        let ctx: IFabricAsyncOperationContext = AsyncContext::new(callback).into();
         // TODO: maybe ctx return needs to set first
         unsafe { ctx.Callback().expect("cannot get callback").Invoke(&ctx) };
-        unsafe { *context = ctx.into_raw() };
-        Ok(())
+        Ok(ctx)
     }
 
     fn EndOnDataLoss(
         &self,
-        _context: *mut ::core::ffi::c_void,
+        _context: Option<&IFabricAsyncOperationContext>,
         isstatechanged: *mut u8,
-    ) -> ::windows_core::Result<()> {
+    ) -> windows_core::Result<()> {
         unsafe { *isstatechanged = 0 };
         Ok(())
     }

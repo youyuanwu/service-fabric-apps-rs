@@ -23,9 +23,7 @@ use mssf_core::{
     },
     types::ReplicaRole,
 };
-use sfrc_c::Microsoft::ServiceFabric::ReliableCollectionRuntime::{
-    IFabricDataLossHandler, TxnReplicator_Settings,
-};
+use sfrc_c::ReliableCollectionRuntime::{IFabricDataLossHandler, TxnReplicator_Settings};
 use sfrc_core::wrap::{get_txn_replicator, TxnReplicaReplicator};
 use tokio::sync::oneshot::{self, Sender};
 use tonic::transport::Server;
@@ -224,7 +222,7 @@ impl StatefulServiceReplica for Replica {
 pub mod rpc {
     use std::sync::Arc;
 
-    use sfrc_c::Microsoft::ServiceFabric::ReliableCollectionRuntime::{
+    use sfrc_c::ReliableCollectionRuntime::{
         StateProvider_Info, StateProvider_Info_V1_Size, StateProvider_Kind_Store,
         Store_LockMode_Exclusive,
     };
