@@ -30,5 +30,5 @@ clap = { version = "4", features = ["derive"] }
 
 # testing code not released in crates yet
 [patch.crates-io]
-mssf-core = {git = "https://github.com/youyuanwu/service-fabric-rs-fork.git", rev = "898e95dc348b5a04b2f8a763c3bcae39021c1dca"}
-mssf-com = {git = "https://github.com/youyuanwu/service-fabric-rs-fork.git", rev = "898e95dc348b5a04b2f8a763c3bcae39021c1dca"}
+mssf-core = {git = "https://github.com/youyuanwu/service-fabric-rs-fork.git", rev = "5e1956448830333f09ccb2717534219843a2903f"}
+mssf-com = {git = "https://github.com/youyuanwu/service-fabric-rs-fork.git", rev = "5e1956448830333f09ccb2717534219843a2903f"}

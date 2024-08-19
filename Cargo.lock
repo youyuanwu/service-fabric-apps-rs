@@ -723,7 +723,7 @@ dependencies = [
 [[package]]
 name = "mssf-com"
 version = "0.0.8"
-source = "git+https://github.com/youyuanwu/service-fabric-rs-fork.git?rev=898e95dc348b5a04b2f8a763c3bcae39021c1dca#898e95dc348b5a04b2f8a763c3bcae39021c1dca"
+source = "git+https://github.com/youyuanwu/service-fabric-rs-fork.git?rev=5e1956448830333f09ccb2717534219843a2903f#5e1956448830333f09ccb2717534219843a2903f"
 dependencies = [
  "mssf-metadata",
  "mssf-pal",
@@ -734,13 +734,14 @@ dependencies = [
 [[package]]
 name = "mssf-core"
 version = "0.0.8"
-source = "git+https://github.com/youyuanwu/service-fabric-rs-fork.git?rev=898e95dc348b5a04b2f8a763c3bcae39021c1dca#898e95dc348b5a04b2f8a763c3bcae39021c1dca"
+source = "git+https://github.com/youyuanwu/service-fabric-rs-fork.git?rev=5e1956448830333f09ccb2717534219843a2903f#5e1956448830333f09ccb2717534219843a2903f"
 dependencies = [
  "bitflags",
  "config",
  "ctrlc",
  "mssf-com",
  "tokio",
+ "tokio-util",
  "tracing",
  "trait-variant",
  "windows",
@@ -769,7 +770,7 @@ checksum = "39323a0ee935ad85894e31a9f42f2f41f5db403b7d2312d85e77b5a99eb8552d"
 [[package]]
 name = "mssf-pal"
 version = "0.0.8"
-source = "git+https://github.com/youyuanwu/service-fabric-rs-fork.git?rev=898e95dc348b5a04b2f8a763c3bcae39021c1dca#898e95dc348b5a04b2f8a763c3bcae39021c1dca"
+source = "git+https://github.com/youyuanwu/service-fabric-rs-fork.git?rev=5e1956448830333f09ccb2717534219843a2903f#5e1956448830333f09ccb2717534219843a2903f"
 dependencies = [
  "libc",
  "windows",

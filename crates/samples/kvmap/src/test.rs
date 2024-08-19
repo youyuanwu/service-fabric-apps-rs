@@ -3,13 +3,18 @@ use std::time::Duration;
 use mssf_core::{
     client::{
         query_client::QueryClient,
-        svc_mgmt_client::{PartitionKeyType, ServiceEndpointRole, ServiceManagementClient},
+        svc_mgmt_client::{
+            FilterIdHandle, PartitionKeyType, ServiceEndpointRole, ServiceManagementClient,
+        },
         FabricClient,
     },
+    error::FabricErrorCode,
     types::{
-        ReplicaRole, RestartReplicaDescription, ServicePartition, ServicePartitionInformation,
-        ServicePartitionQueryDescription, ServicePartitionStatus, ServiceReplicaQueryDescription,
-        ServiceReplicaQueryResult,
+        QueryServiceReplicaStatus, ReplicaRole, RestartReplicaDescription,
+        ServiceNotificationFilterDescription, ServiceNotificationFilterFlags, ServicePartition,
+        ServicePartitionInformation, ServicePartitionQueryDescription, ServicePartitionStatus,
+        ServiceReplicaQueryDescription, ServiceReplicaQueryResult,
+        StatefulServiceReplicaQueryResult,
     },
     GUID, HSTRING,
 };
@@ -20,9 +25,11 @@ use lazy_static::lazy_static;
 
 // limit 1 test at a time.
 static PERMIT: Semaphore = Semaphore::const_new(1);
-static TIMEOUT: Duration = Duration::from_secs(2);
+static TIMEOUT_LONG: Duration = Duration::from_secs(10);
+static TIMEOUT: Duration = Duration::from_secs(1);
+static SVC_URI: &str = "fabric:/KvMap/KvMapService";
 lazy_static! {
-    static ref KV_MAP_SVC_URI: HSTRING = HSTRING::from("fabric:/KvMap/KvMapService");
+    static ref KV_MAP_SVC_URI: HSTRING = HSTRING::from(SVC_URI);
     static ref FABRIC_CLIENT: FabricClient = FabricClient::new();
 }
 
@@ -40,16 +47,30 @@ impl KvMapMgmt {
         }
     }
 
+    pub async fn register_notification(&self) -> FilterIdHandle {
+        let desc = ServiceNotificationFilterDescription {
+            name: HSTRING::from(SVC_URI),
+            flags: ServiceNotificationFilterFlags::NamePrefix,
+        };
+        // register takes more than 1 sec.
+        self.svc
+            .register_service_notification_filter(&desc, TIMEOUT_LONG)
+            .await
+            .unwrap()
+    }
+
+    pub async fn unregister_notification(&self, h: FilterIdHandle) {
+        self.svc
+            .unregister_service_notification_filter(h, TIMEOUT_LONG)
+            .await
+            .unwrap();
+    }
+
     // first is primary
-    pub async fn get_addrs(&self) -> (String, String) {
+    pub async fn get_addrs(&self) -> mssf_core::Result<(String, String)> {
         let resolution = self
             .svc
-            .resolve_service_partition(
-                &KV_MAP_SVC_URI,
-                &PartitionKeyType::None,
-                None,
-                Duration::from_secs(1),
-            )
+            .resolve_service_partition(&KV_MAP_SVC_URI, &PartitionKeyType::None, None, TIMEOUT_LONG)
             .await
             .unwrap();
         // find endpoints
@@ -59,25 +80,36 @@ impl KvMapMgmt {
 
         let primary_addr = endpoints
             .iter()
-            .find(|e| e.role == ServiceEndpointRole::StatefulPrimary)
-            .expect("no primary found")
-            .address
-            .to_string();
+            .find(|e| e.role == ServiceEndpointRole::StatefulPrimary);
         let secondary_addr = endpoints
             .iter()
-            .find(|e| e.role == ServiceEndpointRole::StatefulSecondary)
-            .expect("no secondary found")
-            .address
-            .to_string();
-        (primary_addr, secondary_addr)
+            .find(|e| e.role == ServiceEndpointRole::StatefulSecondary);
+        if primary_addr.is_none() || secondary_addr.is_none() {
+            Err(FabricErrorCode::OperationFailed.into())
+        } else {
+            Ok((
+                primary_addr.unwrap().address.to_string(),
+                secondary_addr.unwrap().address.to_string(),
+            ))
+        }
     }
 
-    pub async fn get_partition(&self) -> (GUID, ServicePartitionStatus) {
+    pub async fn get_addrs_retry(&self) -> (String, String) {
+        for _ in 1..30 {
+            if let Ok(addrs) = self.get_addrs().await {
+                return addrs;
+            }
+            tokio::time::sleep(TIMEOUT).await;
+        }
+        panic!("fail to get addrs");
+    }
+
+    pub async fn get_partition(&self) -> mssf_core::Result<(GUID, ServicePartitionStatus)> {
         let desc = ServicePartitionQueryDescription {
             service_name: KV_MAP_SVC_URI.clone(),
             partition_id_filter: None,
         };
-        let list = self.query.get_partition_list(&desc, TIMEOUT).await.unwrap();
+        let list = self.query.get_partition_list(&desc, TIMEOUT_LONG).await?;
         // there is only one partition
         let p = list.iter().next().unwrap();
         let stateful = match p {
@@ -89,17 +121,39 @@ impl KvMapMgmt {
             ServicePartitionInformation::Singleton(s) => s,
             _ => panic!("not singleton"),
         };
-        (single.id, stateful.partition_status)
+        Ok((single.id, stateful.partition_status))
+    }
+
+    pub async fn get_partition_wait_ready(&self) -> (GUID, ServicePartitionStatus) {
+        for _ in 0..10 {
+            if let Ok((id, status)) = self.get_partition().await {
+                if status == ServicePartitionStatus::Ready {
+                    return (id, status);
+                }
+            }
+            tokio::time::sleep(TIMEOUT).await;
+        }
+        panic!("partition not found or not ready");
     }
 
     // returns secondary for now.
-    pub async fn get_replicas(&self, partition_id: GUID) -> (i64, HSTRING) {
+    pub async fn get_replicas(
+        &self,
+        partition_id: GUID,
+    ) -> mssf_core::Result<(
+        StatefulServiceReplicaQueryResult,
+        StatefulServiceReplicaQueryResult,
+    )> {
         let desc = ServiceReplicaQueryDescription {
             partition_id: partition_id,
             replica_id_or_instance_id_filter: None,
         };
 
-        let replicas = self.query.get_replica_list(&desc, TIMEOUT).await.unwrap();
+        let replicas = self
+            .query
+            .get_replica_list(&desc, TIMEOUT_LONG)
+            .await
+            .unwrap();
         let replicas = replicas
             .iter()
             .map(|x| match x {
@@ -109,16 +163,39 @@ impl KvMapMgmt {
             .collect::<Vec<_>>();
         assert_eq!(replicas.len(), 2);
 
-        // let primary = replicas
-        //     .iter()
-        //     .find(|r| r.replica_role == ReplicaRole::Primary)
-        //     .unwrap();
+        let primary = replicas
+            .iter()
+            .find(|r| r.replica_role == ReplicaRole::Primary);
+        if primary.is_none() {
+            return Err(FabricErrorCode::OperationFailed.into());
+        }
         let secondary = replicas
             .iter()
-            .find(|r| r.replica_role != ReplicaRole::Primary)
-            .unwrap();
-        // make a copy TODO: fix core crate to enable clone
-        (secondary.replica_id, secondary.node_name.clone())
+            .find(|r| r.replica_role != ReplicaRole::Primary);
+        if secondary.is_none() {
+            return Err(FabricErrorCode::OperationFailed.into());
+        }
+        Ok((primary.unwrap().clone(), secondary.unwrap().clone()))
+    }
+
+    pub async fn get_replicas_wait_healthy(
+        &self,
+        partition_id: GUID,
+    ) -> (
+        StatefulServiceReplicaQueryResult,
+        StatefulServiceReplicaQueryResult,
+    ) {
+        for _ in 0..10 {
+            if let Ok((p, s)) = self.get_replicas(partition_id).await {
+                if s.replica_status == QueryServiceReplicaStatus::Ready
+                    && p.replica_status == QueryServiceReplicaStatus::Ready
+                {
+                    return (p, s);
+                }
+            }
+            tokio::time::sleep(TIMEOUT).await;
+        }
+        panic!("replicas not found or not healthy");
     }
 
     pub async fn restart_replica(&self, node_name: HSTRING, partition_id: GUID, replica_id: i64) {
@@ -127,17 +204,23 @@ impl KvMapMgmt {
             partition_id: partition_id,
             replica_or_instance_id: replica_id,
         };
-        self.svc.restart_replica(&desc, TIMEOUT).await.unwrap();
+        self.svc.restart_replica(&desc, TIMEOUT_LONG).await.unwrap();
     }
 }
 
 #[tokio::test]
 async fn read_write_test() {
     let _token = PERMIT.acquire().await.unwrap();
+    let c = KvMapMgmt::new(&FABRIC_CLIENT);
+    let h = c.register_notification().await;
+
+    // wait for replica healthy
+    let (partition_id, status) = c.get_partition_wait_ready().await;
+    assert_eq!(status, ServicePartitionStatus::Ready);
+    let (_, _) = c.get_replicas_wait_healthy(partition_id).await;
 
     // resolve port on local onebox
-    let c = KvMapMgmt::new(&FABRIC_CLIENT);
-    let (primary_addr, secondary_addr) = c.get_addrs().await;
+    let (primary_addr, secondary_addr) = c.get_addrs_retry().await;
 
     println!("primary_addr: {}", primary_addr);
     // connect primary via grpc
@@ -186,6 +269,8 @@ async fn read_write_test() {
             println!("RESPONSE={:?}", response2);
         }
     }
+
+    c.unregister_notification(h).await;
 }
 
 // TODO: perform failover.
@@ -193,20 +278,58 @@ async fn read_write_test() {
 async fn failover_test() {
     let _token = PERMIT.acquire().await.unwrap();
     let c = KvMapMgmt::new(&FABRIC_CLIENT);
-    let (partition_id, status) = c.get_partition().await;
+    let h = c.register_notification().await;
+
+    let (partition_id, status) = c.get_partition_wait_ready().await;
     assert_eq!(status, ServicePartitionStatus::Ready);
 
-    let (s_id, node_name) = c.get_replicas(partition_id).await;
+    let (primary, secondary) = c.get_replicas(partition_id).await.unwrap();
     // restart secondary
-    c.restart_replica(node_name, partition_id, s_id).await;
+    c.restart_replica(secondary.node_name, partition_id, secondary.replica_id)
+        .await;
 
-    // wait some time for replica to be up
-    tokio::time::sleep(Duration::from_secs(2)).await;
+    // wait for replica id change of secondary
+    for i in 0..10 {
+        let (p2, s2) = c.get_replicas_wait_healthy(partition_id).await;
+        if s2.replica_id != secondary.replica_id {
+            assert_eq!(p2.replica_id, primary.replica_id);
+            break;
+        }
+        if i == 10 {
+            panic!("secondary replica id did not change");
+        }
+        tokio::time::sleep(TIMEOUT).await;
+    }
+
+    // save addr before primary failover
+    let (p_addr, _) = c.get_addrs_retry().await;
+
     // restart primary
-    // c.restart_replica(HSTRING::from("TODO"), partition_id, p_id)
-    // .await;
+    c.restart_replica(primary.node_name, partition_id, primary.replica_id)
+        .await;
+    for i in 0..10 {
+        let (p3, _) = c.get_replicas_wait_healthy(partition_id).await;
 
-    // wait some time for replica to be up for other tests
-    tokio::time::sleep(Duration::from_secs(5)).await;
-    // TODO: impl utilities to wait for replica to be healthy
+        if p3.replica_id != primary.replica_id {
+            break;
+        }
+
+        if i == 10 {
+            panic!("primary replica id did not change");
+        }
+        tokio::time::sleep(TIMEOUT).await;
+    }
+
+    // wait for addr change of primary
+    for i in 0..10 {
+        let (p_addr2, _) = c.get_addrs_retry().await;
+        if p_addr != p_addr2 {
+            break;
+        }
+        if i == 10 {
+            panic!("primary addr did not change");
+        }
+        tokio::time::sleep(TIMEOUT).await;
+    }
+    c.unregister_notification(h).await;
 }
