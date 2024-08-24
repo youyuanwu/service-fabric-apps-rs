@@ -1,13 +1,13 @@
 cmake_minimum_required(VERSION 3.20)
 
-project(sf-reliable-collection-rs LANGUAGES)
+project(sf-reliable-collection-rs LANGUAGES CXX)
 
 if(WIN32)
 message(STATUS "fetching fabric_metadata")
 include(FetchContent)
 FetchContent_Declare(fabric_metadata
     GIT_REPOSITORY https://github.com/youyuanwu/service-fabric-metadata-fork.git
-    GIT_TAG 086c7b6b2fb65fcef1fab5cd04cbadd24a595b47
+    GIT_TAG 552f4e38ad2c772419e52e62207c236fc31ffcbb
 )
 FetchContent_GetProperties(fabric_metadata)
 if(NOT fabric_metadata_POPULATED)
@@ -70,11 +70,12 @@ add_custom_target(generate_rust
   DEPENDS generate_winmd
 )
 
-add_subdirectory(crates/samples)
-
 add_custom_target(force_clean
   COMMAND ${CMAKE_COMMAND} -E rm -rf crates/libs/c/src/Microsoft
   COMMAND ${CMAKE_COMMAND} -E rm -rf .windows
   COMMAND ${CMAKE_COMMAND} -E rm -rf build/ReliableCollectionRuntime.lib
   WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
 )
+
+enable_testing()
+add_subdirectory(crates/samples)
