@@ -78,6 +78,7 @@ async fn main() {
             &PartitionKeyType::None,
             None,
             Duration::from_secs(1),
+            None,
         )
         .await
         .unwrap();

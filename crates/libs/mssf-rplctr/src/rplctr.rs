@@ -8,7 +8,7 @@ use mssf_core::{
         stateful_types::{Epoch, ReplicaInfo, ReplicaSetConfig, ReplicaSetQuarumMode},
         store_types::ReplicatorSettings,
     },
-    sync::FabricReceiver,
+    sync::{CancellationToken, FabricReceiver2},
     types::ReplicaRole,
     HSTRING,
 };
@@ -51,18 +51,23 @@ impl<T: StateProvider> Rplctr<T> {
 }
 
 impl<T: StateProvider> Replicator for Rplctr<T> {
-    async fn open(&self) -> mssf_core::Result<HSTRING> {
+    async fn open(&self, _: CancellationToken) -> mssf_core::Result<HSTRING> {
         // start rpc server
         todo!()
     }
-    async fn close(&self) -> mssf_core::Result<()> {
+    async fn close(&self, _: CancellationToken) -> mssf_core::Result<()> {
         todo!()
     }
-    async fn change_role(&self, _epoch: &Epoch, _role: &ReplicaRole) -> mssf_core::Result<()> {
+    async fn change_role(
+        &self,
+        _epoch: &Epoch,
+        _role: &ReplicaRole,
+        _: CancellationToken,
+    ) -> mssf_core::Result<()> {
         todo!()
     }
     // called only on secondaries.
-    async fn update_epoch(&self, _epoch: &Epoch) -> mssf_core::Result<()> {
+    async fn update_epoch(&self, _epoch: &Epoch, _: CancellationToken) -> mssf_core::Result<()> {
         todo!()
     }
     fn get_current_progress(&self) -> mssf_core::Result<i64> {
@@ -77,11 +82,15 @@ impl<T: StateProvider> Replicator for Rplctr<T> {
 }
 
 impl<T: StateProvider> PrimaryReplicator for Rplctr<T> {
-    async fn on_data_loss(&self) -> mssf_core::Result<u8> {
-        self.inner.state_prov.on_data_loss().await.map(|c| match c {
-            true => 1,
-            false => 0,
-        })
+    async fn on_data_loss(&self, cancellation_token: CancellationToken) -> mssf_core::Result<u8> {
+        self.inner
+            .state_prov
+            .on_data_loss(cancellation_token)
+            .await
+            .map(|c| match c {
+                true => 1,
+                false => 0,
+            })
     }
     fn update_catch_up_replica_set_configuration(
         &self,
@@ -93,6 +102,7 @@ impl<T: StateProvider> PrimaryReplicator for Rplctr<T> {
     async fn wait_for_catch_up_quorum(
         &self,
         _catchupmode: ReplicaSetQuarumMode,
+        _: CancellationToken,
     ) -> mssf_core::Result<()> {
         todo!()
     }
@@ -102,7 +112,11 @@ impl<T: StateProvider> PrimaryReplicator for Rplctr<T> {
     ) -> mssf_core::Result<()> {
         todo!()
     }
-    async fn build_replica(&self, _replica: &ReplicaInfo) -> mssf_core::Result<()> {
+    async fn build_replica(
+        &self,
+        _replica: &ReplicaInfo,
+        _: CancellationToken,
+    ) -> mssf_core::Result<()> {
         todo!()
     }
     fn remove_replica(&self, _replicaid: i64) -> mssf_core::Result<()> {
@@ -115,7 +129,8 @@ impl<T: StateProvider> StateReplicator for StRplctr<T> {
     fn replicate(
         &self,
         _operation_data: impl OperationData,
-    ) -> (i64, FabricReceiver<mssf_core::Result<i64>>) {
+        _: CancellationToken,
+    ) -> (i64, FabricReceiver2<mssf_core::Result<i64>>) {
         todo!()
     }
 
@@ -141,7 +156,10 @@ impl<T: StateProvider> StateReplicator for StRplctr<T> {
 pub struct DummyOperationStream {}
 
 impl OperationStream for DummyOperationStream {
-    async fn get_operation(&self) -> mssf_core::Result<Option<impl Operation>> {
+    async fn get_operation(
+        &self,
+        _: CancellationToken,
+    ) -> mssf_core::Result<Option<impl Operation>> {
         Ok(Some(DummyOperation {}))
     }
 

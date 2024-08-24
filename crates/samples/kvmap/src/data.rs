@@ -5,6 +5,7 @@ use std::{
 };
 
 use bytes::Bytes;
+use mssf_core::sync::CancellationToken;
 use mssf_ext::{
     data::OperationDataBuf,
     traits::{OperationData, OperationDataStream},
@@ -30,7 +31,10 @@ impl CountingOperationDataStream {
 
 // dummy stream returns data 2 times and then none
 impl OperationDataStream for CountingOperationDataStream {
-    async fn get_next(&self) -> mssf_core::Result<Option<impl OperationData>> {
+    async fn get_next(
+        &self,
+        _: CancellationToken,
+    ) -> mssf_core::Result<Option<impl OperationData>> {
         let mut c = self.count.lock().unwrap();
         if c.get() == self.max {
             return Ok(None);
@@ -56,7 +60,10 @@ impl<T: OperationData> VecOperationDataStream<T> {
 }
 
 impl<T: OperationData> OperationDataStream for VecOperationDataStream<T> {
-    async fn get_next(&self) -> mssf_core::Result<Option<impl OperationData>> {
+    async fn get_next(
+        &self,
+        _: CancellationToken,
+    ) -> mssf_core::Result<Option<impl OperationData>> {
         let next = self.v.lock().unwrap().get_mut().pop();
         Ok(next)
     }

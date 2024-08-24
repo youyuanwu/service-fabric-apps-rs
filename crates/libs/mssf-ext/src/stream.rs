@@ -9,7 +9,7 @@ use mssf_com::{
 };
 use mssf_core::{
     runtime::executor::Executor,
-    sync::{fabric_begin_bridge, fabric_begin_end_proxy, fabric_end_bridge},
+    sync::{fabric_begin_end_proxy2, BridgeContext3, CancellationToken},
 };
 use windows_core::{implement, Interface};
 
@@ -47,51 +47,23 @@ impl<T: OperationDataStream, E: Executor> IFabricOperationDataStream_Impl
         callback: Option<&IFabricAsyncOperationCallback>,
     ) -> windows_core::Result<IFabricAsyncOperationContext> {
         let inner = self.inner.clone();
-        fabric_begin_bridge(&self.rt, callback, async move {
-            inner.get_next().await.map(|opt| {
+        let (ctx, token) = BridgeContext3::make(callback);
+        ctx.spawn(&self.rt, async move {
+            inner.get_next(token).await.map(|opt| {
                 opt.map_or_else(
                     // convert end of stream of none. lazy eval.
                     || unsafe { IFabricOperationData::from_raw(std::ptr::null_mut()) },
                     |x| IFabricOperationData::from(OperationDataBridge::new(x)),
                 )
             })
-            //.unwrap_or(Ok(unsafe { IFabricOperationData::from_raw(std::ptr::null_mut()) }));
         })
-
-        // let ctx: IFabricAsyncOperationContext =
-        //     BridgeContext::<mssf_core::Result<IFabricOperationData>>::new(callback_cp).into();
-
-        // let ctx_cpy = ctx.clone();
-        // self.rt.spawn(async move {
-        //     let ok = inner_cp.get_next().await;
-        //     let ctx_bridge: &BridgeContext<mssf_core::Result<Option<IFabricOperationData>>> =
-        //         unsafe { ctx_cpy.as_impl() };
-        //     // convert end of stream of none
-        //     let data_bridge =
-        //         ok.map(|opt| opt.map(|x| IFabricOperationData::from(OperationDataBridge::new(x))));
-        //     ctx_bridge.set_content(data_bridge);
-        //     let cb = ctx_bridge.Callback().unwrap();
-        //     unsafe { cb.Invoke(&ctx_cpy) };
-        // });
-        // Ok(ctx)
     }
 
     fn EndGetNext(
         &self,
         context: Option<&IFabricAsyncOperationContext>,
     ) -> windows_core::Result<IFabricOperationData> {
-        fabric_end_bridge(context)
-        // let ctx_bridge: &BridgeContext<mssf_core::Result<Option<IFabricOperationData>>> =
-        //     unsafe { context.unwrap().as_impl() };
-        // // return nullptr is opt is none for end of stream.
-        // let opt = ctx_bridge.consume_content()?;
-        // match opt {
-        //     Some(data) => Ok(data),
-        //     // Returns a nullptr for the caller. The com is detached and no ref count missed.
-        //     // This is a special API, the caller needs to check the returned obj and mem::forget
-        //     // the com obj to avoid refcount error.
-        //     None => Ok(unsafe { IFabricOperationData::from_raw(std::ptr::null_mut()) }),
-        // }
+        BridgeContext3::result(context)?
     }
 }
 
@@ -106,15 +78,19 @@ impl OperationDataStreamProxy {
 }
 
 impl OperationDataStream for OperationDataStreamProxy {
-    async fn get_next(&self) -> mssf_core::Result<Option<impl OperationData>> {
+    async fn get_next(
+        &self,
+        cancellation_token: CancellationToken,
+    ) -> mssf_core::Result<Option<impl OperationData>> {
         // get the data from com
         let com1 = &self.com_impl;
         let com2 = self.com_impl.clone();
-        let rx = fabric_begin_end_proxy(
+        let rx = fabric_begin_end_proxy2(
             move |callback| unsafe { com1.BeginGetNext(callback) },
             move |ctx| unsafe { com2.EndGetNext(ctx) },
+            Some(cancellation_token),
         );
-        let res = rx.await;
+        let res = rx.await?;
         match res {
             Ok(data) => {
                 let proxy = OperationDataProxy::new(data)?;
@@ -144,14 +120,18 @@ impl OperationStreamProxy {
 }
 
 impl OperationStream for OperationStreamProxy {
-    async fn get_operation(&self) -> mssf_core::Result<Option<impl Operation>> {
+    async fn get_operation(
+        &self,
+        cancellation_token: CancellationToken,
+    ) -> mssf_core::Result<Option<impl Operation>> {
         let com1 = &self.com_impl;
         let com2 = self.com_impl.clone();
-        let rx = fabric_begin_end_proxy(
+        let rx = fabric_begin_end_proxy2(
             move |callback| unsafe { com1.BeginGetOperation(callback) },
             move |ctx| unsafe { com2.EndGetOperation(ctx) },
+            Some(cancellation_token),
         );
-        let res = rx.await;
+        let res = rx.await?;
         match res {
             Ok(op) => {
                 let proxy = OperationProxy::new(op);
@@ -181,7 +161,7 @@ mod test {
 
     use bytes::{Buf, Bytes};
     use mssf_com::FabricRuntime::IFabricOperationDataStream;
-    use mssf_core::runtime::executor::DefaultExecutor;
+    use mssf_core::{runtime::executor::DefaultExecutor, sync::CancellationToken};
 
     use crate::{
         data::OperationDataBuf,
@@ -197,7 +177,10 @@ mod test {
 
     // dummy stream returns data 2 times and then none
     impl OperationDataStream for MyOperationDataStream {
-        async fn get_next(&self) -> mssf_core::Result<Option<impl OperationData>> {
+        async fn get_next(
+            &self,
+            _: CancellationToken,
+        ) -> mssf_core::Result<Option<impl OperationData>> {
             let mut c = self.count.lock().unwrap();
             if c.get() == 2 {
                 return Ok(None);
@@ -223,11 +206,19 @@ mod test {
             OpeartionDataStreamBridge::new(mystream, rt).into();
         let proxy = OperationDataStreamProxy::new(bridge);
 
-        let d0 = proxy.get_next().await.unwrap().unwrap();
+        let d0 = proxy
+            .get_next(CancellationToken::new())
+            .await
+            .unwrap()
+            .unwrap();
         assert_eq!(d0.chunk(), "value0".as_bytes());
-        let d1 = proxy.get_next().await.unwrap().unwrap();
+        let d1 = proxy
+            .get_next(CancellationToken::new())
+            .await
+            .unwrap()
+            .unwrap();
         assert_eq!(d1.chunk(), "value1".as_bytes());
-        let d2 = proxy.get_next().await.unwrap();
+        let d2 = proxy.get_next(CancellationToken::new()).await.unwrap();
         assert!(d2.is_none());
     }
 }

@@ -7,7 +7,7 @@ use mssf_com::{
 };
 use mssf_core::{
     runtime::{executor::Executor, stateful_types::Epoch},
-    sync::{fabric_begin_bridge, fabric_end_bridge},
+    sync::BridgeContext3,
 };
 use tracing::info;
 use windows_core::implement;
@@ -53,9 +53,10 @@ impl<T: StateProvider, E: Executor> IFabricStateProvider_Impl for StateProviderB
         info!("StateProviderBridge::BeginUpdateEpoch");
         let epoch2 = Epoch::from(unsafe { epoch.as_ref().unwrap() });
         let inner = self.inner.clone();
-        fabric_begin_bridge(&self.rt, callback, async move {
+        let (ctx, token) = BridgeContext3::make(callback);
+        ctx.spawn(&self.rt, async move {
             inner
-                .update_epoch(&epoch2, previousepochlastsequencenumber)
+                .update_epoch(&epoch2, previousepochlastsequencenumber, token)
                 .await
         })
     }
@@ -65,7 +66,7 @@ impl<T: StateProvider, E: Executor> IFabricStateProvider_Impl for StateProviderB
         context: Option<&IFabricAsyncOperationContext>,
     ) -> windows_core::Result<()> {
         info!("StateProviderBridge::EndUpdateEpoch");
-        fabric_end_bridge(context)
+        BridgeContext3::result(context)?
     }
 
     fn GetLastCommittedSequenceNumber(&self) -> windows_core::Result<i64> {
@@ -77,18 +78,15 @@ impl<T: StateProvider, E: Executor> IFabricStateProvider_Impl for StateProviderB
         callback: Option<&IFabricAsyncOperationCallback>,
     ) -> windows_core::Result<IFabricAsyncOperationContext> {
         let inner = self.inner.clone();
-        fabric_begin_bridge(
-            &self.rt,
-            callback,
-            async move { inner.on_data_loss().await },
-        )
+        let (ctx, token) = BridgeContext3::make(callback);
+        ctx.spawn(&self.rt, async move { inner.on_data_loss(token).await })
     }
 
     fn EndOnDataLoss(
         &self,
         context: Option<&IFabricAsyncOperationContext>,
     ) -> windows_core::Result<u8> {
-        fabric_end_bridge(context)
+        BridgeContext3::result(context)?
     }
 
     fn GetCopyContext(&self) -> windows_core::Result<IFabricOperationDataStream> {

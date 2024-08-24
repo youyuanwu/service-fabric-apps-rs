@@ -54,14 +54,14 @@ impl KvMapMgmt {
         };
         // register takes more than 1 sec.
         self.svc
-            .register_service_notification_filter(&desc, TIMEOUT_LONG)
+            .register_service_notification_filter(&desc, TIMEOUT_LONG, None)
             .await
             .unwrap()
     }
 
     pub async fn unregister_notification(&self, h: FilterIdHandle) {
         self.svc
-            .unregister_service_notification_filter(h, TIMEOUT_LONG)
+            .unregister_service_notification_filter(h, TIMEOUT_LONG, None)
             .await
             .unwrap();
     }
@@ -70,7 +70,13 @@ impl KvMapMgmt {
     pub async fn get_addrs(&self) -> mssf_core::Result<(String, String)> {
         let resolution = self
             .svc
-            .resolve_service_partition(&KV_MAP_SVC_URI, &PartitionKeyType::None, None, TIMEOUT_LONG)
+            .resolve_service_partition(
+                &KV_MAP_SVC_URI,
+                &PartitionKeyType::None,
+                None,
+                TIMEOUT_LONG,
+                None,
+            )
             .await
             .unwrap();
         // find endpoints
@@ -109,7 +115,10 @@ impl KvMapMgmt {
             service_name: KV_MAP_SVC_URI.clone(),
             partition_id_filter: None,
         };
-        let list = self.query.get_partition_list(&desc, TIMEOUT_LONG).await?;
+        let list = self
+            .query
+            .get_partition_list(&desc, TIMEOUT_LONG, None)
+            .await?;
         // there is only one partition
         let p = list.iter().next().unwrap();
         let stateful = match p {
@@ -151,7 +160,7 @@ impl KvMapMgmt {
 
         let replicas = self
             .query
-            .get_replica_list(&desc, TIMEOUT_LONG)
+            .get_replica_list(&desc, TIMEOUT_LONG, None)
             .await
             .unwrap();
         let replicas = replicas
@@ -204,7 +213,10 @@ impl KvMapMgmt {
             partition_id: partition_id,
             replica_or_instance_id: replica_id,
         };
-        self.svc.restart_replica(&desc, TIMEOUT_LONG).await.unwrap();
+        self.svc
+            .restart_replica(&desc, TIMEOUT_LONG, None)
+            .await
+            .unwrap();
     }
 }
 

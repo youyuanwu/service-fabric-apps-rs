@@ -21,6 +21,7 @@ use mssf_core::{
         stateful_proxy::PrimaryReplicatorProxy,
         stateful_types::OpenMode,
     },
+    sync::CancellationToken,
     types::ReplicaRole,
 };
 use sfrc_c::ReliableCollectionRuntime::{IFabricDataLossHandler, TxnReplicator_Settings};
@@ -162,6 +163,7 @@ impl StatefulServiceReplica for Replica {
         &self,
         openmode: OpenMode,
         partition: &StatefulServicePartition,
+        _: CancellationToken,
     ) -> windows::core::Result<impl PrimaryReplicator> {
         // should be primary replicator
         info!("Replica::open {:?}", openmode);
@@ -197,7 +199,11 @@ impl StatefulServiceReplica for Replica {
 
         Ok(PrimaryReplicatorProxy::new(p))
     }
-    async fn change_role(&self, newrole: ReplicaRole) -> ::windows_core::Result<HSTRING> {
+    async fn change_role(
+        &self,
+        newrole: ReplicaRole,
+        _: CancellationToken,
+    ) -> ::windows_core::Result<HSTRING> {
         info!("Replica::change_role {:?}", newrole);
 
         if newrole == ReplicaRole::Primary {
@@ -206,7 +212,7 @@ impl StatefulServiceReplica for Replica {
         let addr = HSTRING::from(format!("http://localhost:{}", self.grpc_port));
         Ok(addr)
     }
-    async fn close(&self) -> windows::core::Result<()> {
+    async fn close(&self, _: CancellationToken) -> windows::core::Result<()> {
         info!("Replica::close");
         self.svc.stop();
         Ok(())
@@ -467,6 +473,7 @@ pub mod rpc {
                     &PartitionKeyType::None,
                     None,
                     Duration::from_secs(1),
+                    None,
                 )
                 .await
                 .unwrap();

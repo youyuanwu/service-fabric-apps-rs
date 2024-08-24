@@ -135,9 +135,12 @@ struct CopyStatePayload {
 }
 
 impl<T: OperationDataStream> OperationDataStream for CopyStateStream<T> {
-    async fn get_next(&self) -> mssf_core::Result<Option<impl OperationData>> {
+    async fn get_next(
+        &self,
+        cancellation_token: CancellationToken,
+    ) -> mssf_core::Result<Option<impl OperationData>> {
         // if ctx stream is end we end as well.
-        let ctx = self.ctx_stream.get_next().await?;
+        let ctx = self.ctx_stream.get_next(cancellation_token).await?;
         if ctx.is_none() {
             return Ok(None);
         }
@@ -220,6 +223,7 @@ impl StatefulServiceReplica for Replica {
         &self,
         openmode: OpenMode,
         partition: &StatefulServicePartition,
+        _: CancellationToken,
     ) -> mssf_core::Result<impl PrimaryReplicator> {
         let com = partition.get_com();
 
@@ -300,7 +304,11 @@ impl StatefulServiceReplica for Replica {
         Ok(proxy)
     }
 
-    async fn change_role(&self, newrole: ReplicaRole) -> mssf_core::Result<HSTRING> {
+    async fn change_role(
+        &self,
+        newrole: ReplicaRole,
+        _: CancellationToken,
+    ) -> mssf_core::Result<HSTRING> {
         // get the state replicator opened.
         let sr = self
             .state_replicator
@@ -341,7 +349,7 @@ impl StatefulServiceReplica for Replica {
                     loop {
                         let opt = select! {
                             _ = token.cancelled() => { None }
-                            res = rplct_stream.get_operation() => {
+                            res = rplct_stream.get_operation(CancellationToken::new()) => {
                                 res.unwrap() // get op should be ok
                             }
                         };
@@ -366,7 +374,11 @@ impl StatefulServiceReplica for Replica {
                 self.ctx.rt.spawn(async move {
                     // handle copying. i.e. catch up from primary. The stream is from copy_state from primary
                     let copy_stream = sr.get_copy_stream().unwrap();
-                    while let Some(c) = copy_stream.get_operation().await.unwrap() {
+                    while let Some(c) = copy_stream
+                        .get_operation(CancellationToken::new())
+                        .await
+                        .unwrap()
+                    {
                         let b = c.get_data().unwrap();
                         let s = String::from_utf8_lossy(b.chunk()).into_owned();
                         let p: CopyStatePayload = serde_json::from_str(&s).unwrap();
@@ -412,7 +424,7 @@ impl StatefulServiceReplica for Replica {
         Ok(addr_res)
     }
 
-    async fn close(&self) -> mssf_core::Result<()> {
+    async fn close(&self, _: CancellationToken) -> mssf_core::Result<()> {
         // cancel background
         {
             let token = self.background_cancel.lock().await.take();
@@ -462,6 +474,7 @@ impl StateProvider for KvStateProvider {
         &self,
         epoch: &Epoch,
         previousepochlastsequencenumber: i64,
+        _: CancellationToken,
     ) -> mssf_core::Result<()> {
         info!(
             "update_epoch: Epoch: {:?}, previous epoch lsn: {}",
@@ -475,7 +488,7 @@ impl StateProvider for KvStateProvider {
         info!("get_last_committed_sequence_number: {lsn}");
         Ok(lsn)
     }
-    async fn on_data_loss(&self) -> mssf_core::Result<bool> {
+    async fn on_data_loss(&self, _: CancellationToken) -> mssf_core::Result<bool> {
         info!("on_data_loss");
         Ok(false)
     }

@@ -1,7 +1,7 @@
 use bytes::Buf;
 use mssf_core::{
     runtime::{stateful_types::Epoch, store_types::ReplicatorSettings},
-    sync::FabricReceiver,
+    sync::{CancellationToken, FabricReceiver2},
 };
 
 use crate::types::OperationMetadata;
@@ -19,6 +19,7 @@ pub trait LocalStateProvider: Sync + 'static {
         &self,
         epoch: &Epoch,
         previousepochlastsequencenumber: i64,
+        cancellation_token: CancellationToken,
     ) -> mssf_core::Result<()>;
 
     /// Obtains the last sequence number that the service has committed,
@@ -28,7 +29,7 @@ pub trait LocalStateProvider: Sync + 'static {
     /// Indicates that a write quorum of replicas in this replica set has been lost,
     /// and that therefore data loss might have occurred.
     /// The replica set consists of a majority of replicas, which includes the primary replica.
-    async fn on_data_loss(&self) -> mssf_core::Result<bool>; // is state changed.
+    async fn on_data_loss(&self, cancellation_token: CancellationToken) -> mssf_core::Result<bool>; // is state changed.
 
     /// Obtains context on a secondary replica after it is created
     /// and opened to send context to the primary replica.
@@ -92,7 +93,8 @@ pub trait StateReplicator {
     fn replicate(
         &self,
         operation_data: impl OperationData,
-    ) -> (i64, FabricReceiver<mssf_core::Result<i64>>);
+        cancellation_token: CancellationToken,
+    ) -> (i64, FabricReceiver2<mssf_core::Result<i64>>);
 
     /// Gets replication stream.
     /// Returns:
@@ -137,7 +139,10 @@ pub trait OperationData: Buf + Sync + Send + 'static {
 #[trait_variant::make(OperationDataStream: Send)]
 pub trait LocalOperationDataStream: Sync + 'static {
     // Returning null indicates to the system that the transfer is complete.
-    async fn get_next(&self) -> mssf_core::Result<Option<impl OperationData>>;
+    async fn get_next(
+        &self,
+        cancellation_token: CancellationToken,
+    ) -> mssf_core::Result<Option<impl OperationData>>;
 }
 
 // IFabricOperation
@@ -172,6 +177,9 @@ pub trait Operation: Send {
 #[trait_variant::make(OperationStream: Send)]
 pub trait LocalOperationStream {
     // returns null if end of stream.
-    async fn get_operation(&self) -> mssf_core::Result<Option<impl Operation>>;
+    async fn get_operation(
+        &self,
+        cancellation_token: CancellationToken,
+    ) -> mssf_core::Result<Option<impl Operation>>;
     fn report_fault(&self) -> mssf_core::Result<()>; // TODO:
 }
