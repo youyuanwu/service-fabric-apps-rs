@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.20)
+cmake_minimum_required(VERSION 3.27)
 
 project(sf-reliable-collection-rs LANGUAGES CXX)
 
@@ -75,6 +75,11 @@ add_custom_target(force_clean
   COMMAND ${CMAKE_COMMAND} -E rm -rf .windows
   COMMAND ${CMAKE_COMMAND} -E rm -rf build/ReliableCollectionRuntime.lib
   WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+)
+
+add_custom_target(build_rust ALL
+    COMMAND ${cargo_exe} build --all
+    WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
 )
 
 enable_testing()

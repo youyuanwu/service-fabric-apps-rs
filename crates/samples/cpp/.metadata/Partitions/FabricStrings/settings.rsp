@@ -1,0 +1,4 @@
+--traverse
+<IncludeRoot>/FabricStrings.h
+--namespace
+Microsoft.ServiceFabric.FabricStrings

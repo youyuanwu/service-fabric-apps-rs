@@ -26,8 +26,7 @@ endif()
 # copy files to build folder to form a code package.
 
 add_custom_target(build_rust_sample_rcstore ALL
-    COMMAND ${cargo_exe} build -p rcstore
-    WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+  DEPENDS build_rust
 )
 
 set(_pkg_root ${CMAKE_BINARY_DIR}/rcstore_root)
@@ -52,7 +51,7 @@ add_custom_command(TARGET build_rust_sample_rcstore POST_BUILD
 if(WIN32)
   # need to generate import lib
   add_dependencies(
-    build_rust_sample_rcstore
+    build_rust
     ReliableCollectionRuntime
   )
 endif(WIN32)

@@ -1,8 +1,7 @@
 # copy files to build folder to form a code package.
 
 add_custom_target(build_rust_sample_kvstore ALL
-    COMMAND ${cargo_exe} build -p kvstore
-    WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+    DEPENDS build_rust
 )
 
 set(_pkg_root ${CMAKE_BINARY_DIR}/kvstore_root)

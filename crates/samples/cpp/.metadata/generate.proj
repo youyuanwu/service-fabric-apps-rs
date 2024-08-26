@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project Sdk="Microsoft.Windows.WinmdGenerator/0.56.13-preview">
+    <PropertyGroup Label="Globals">
+        <OutputWinmd>../.windows/winmd/Microsoft.ServiceFabric.FabricStrings.winmd</OutputWinmd>
+        <WinmdVersion>255.255.255.255</WinmdVersion>
+        <ExcludeFromCrossarch>true</ExcludeFromCrossarch>
+        <ScanArch>x64</ScanArch>
+        <SFIdlDir>$(MSBuildProjectDirectory)\..\..\..\..\build\_deps\fabric_metadata-src\idl</SFIdlDir>
+        <AdditionalIncludes>$(SFIdlDir)</AdditionalIncludes>
+        <!--compiled h headers from idl-->
+        <SdkIncRoot>obj\CompiledHeaders</SdkIncRoot>
+    </PropertyGroup>
+    <ItemGroup>
+        <EmitterRsp Include="./emitter.settings.rsp"/>
+    </ItemGroup>
+    <ItemGroup>
+        <!--depenent idls are regenerated.-->
+        <Idls Include="$(SFIdlDir)\FabricCommon.idl;$(SFIdlDir)\FabricTypes.idl;..\FabricStrings.idl" />
+        <!-- <ImportLibs Include="../importlibs/*.lib" /> -->
+        <PartitionFiles Include="partitions\**\main.cpp"/>
+        <Partition Include="@(PartitionFiles)">
+            <Name>$([System.IO.Path]::GetFileName($([System.IO.Path]::GetDirectoryName($([System.String]::Copy('%(Directory)'))))))</Name>
+        </Partition>
+    </ItemGroup>
+</Project>

@@ -1,0 +1,52 @@
+// example module for Service Fabric wirtten in Rust.
+
+// dependencies
+import "Unknwn.idl";
+import "FabricCommon.idl";
+
+// forward declare
+interface IFabricStringsApiTable;
+interface IFabricStringsBytes;
+
+[
+  uuid(3711066b-3b42-420c-a42f-995edb7e3e11),
+  version(1.0),
+]
+
+library FabricStrings_Lib
+{
+
+// module functions
+[
+  uuid(b8cf40c4-ae9f-435e-9288-9a426fa9e5d9),
+  dllname("FabricStrings.dll")
+]
+module FabricStringsModule {
+    [entry("GetFabricStringsApiTable")] HRESULT GetFabricStringsApiTable(
+         [out, retval] IFabricStringsApiTable **api);
+}
+
+} // FabricStrings_Lib
+
+[object, local, uuid(1125f6a8-c6a6-433e-bf29-75d148fb0faa)]
+interface IFabricStringsApiTable : IUnknown
+{
+  [] HRESULT BeginConcatStrings(
+    [in] IFabricStringsBytes * str1,
+    [in] IFabricStringsBytes * str2,
+    [in] DWORD timeoutMilliseconds,
+    [in] IFabricAsyncOperationCallback * callback,
+    [out, retval] IFabricAsyncOperationContext ** context);
+  
+  [] HRESULT EndConcatStrings(
+    [in] IFabricAsyncOperationContext * context,
+    [out, retval] IFabricStringsBytes ** str);
+}
+
+[object, local, uuid(60cd7314-b572-4094-b05f-b65815a820b5)]
+interface IFabricStringsBytes : IUnknown
+{
+    [] void GetBytes(
+        [out] const BYTE ** Buffer,
+        [out] ULONG * BufferSize);
+}

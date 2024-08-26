@@ -15,8 +15,8 @@ jobs:
     - name: Get MSVC
       uses: ilammy/msvc-dev-cmd@v1
 
-    - name: Get specific version CMake, v3.21.2
-      uses: lukka/get-cmake@v3.21.2
+    - name: Get specific version CMake, v3.27.9
+      uses: lukka/get-cmake@v3.27.9
 
     - name: Install rust stable
       uses: actions-rs/toolchain@v1
@@ -87,8 +87,8 @@ jobs:
         sudo apt-get install servicefabricsdkcommon -y;
         echo "LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/opt/microsoft/servicefabric/bin/Fabric/Fabric.Code" >> $GITHUB_ENV
 
-    - name: Get specific version CMake, v3.21.2
-      uses: lukka/get-cmake@v3.21.2
+    - name: Get specific version CMake, v3.27.9
+      uses: lukka/get-cmake@v3.27.9
 
     - name: Install rust stable
       uses: actions-rs/toolchain@v1

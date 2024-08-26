@@ -1,6 +1,5 @@
 add_custom_target(build_rust_sample_kvmap ALL
-    COMMAND ${cargo_exe} build -p kvmap
-    WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+    DEPENDS build_rust
 )
 
 set(_pkg_root ${CMAKE_BINARY_DIR}/kvmap_root)
