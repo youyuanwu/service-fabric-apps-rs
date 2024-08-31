@@ -44,21 +44,53 @@ int main(){
   assert(hr == S_OK);
   winrt::com_ptr<IFabricStringsBytes> s1 = winrt::make<StringImpl>("mystr1");
   winrt::com_ptr<IFabricStringsBytes> s2 = winrt::make<StringImpl>("mystr2");
-  winrt::com_ptr<IFabricAsyncOperationCallback> callback = winrt::make<Callback>();
-  winrt::com_ptr<IFabricAsyncOperationContext> ctx;
-  hr = api->BeginConcatStrings(s1.get(), s2.get(), 1000, callback.get(), ctx.put());
-  assert(hr == S_OK);
-  assert(ctx);
-  while(1){
-    if(!ctx->IsCompleted()){
-      std::this_thread::sleep_for(std::chrono::milliseconds(100));
-    }else{
-      break;
+
+  // happy case
+  {
+    winrt::com_ptr<IFabricAsyncOperationCallback> callback = winrt::make<Callback>();
+    winrt::com_ptr<IFabricAsyncOperationContext> ctx;
+    hr = api->BeginConcatStrings(s1.get(), s2.get(), 1000, callback.get(), ctx.put());
+    assert(hr == S_OK);
+    assert(ctx);
+    while(1){
+      if(!ctx->IsCompleted()){
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+      }else{
+        break;
+      }
     }
+    winrt::com_ptr<IFabricStringsBytes> s3;
+    hr = api->EndConcatStrings(ctx.get(), s3.put());
+    assert(hr == S_OK);
+    StringProxy proxy(s3);
+    assert(proxy.get_view() == std::string("mystr1mystr2"));
   }
-  winrt::com_ptr<IFabricStringsBytes> s3;
-  hr = api->EndConcatStrings(ctx.get(), s3.put());
-  assert(hr == S_OK);
-  StringProxy proxy(s3);
-  assert(proxy.get_view() == std::string("mystr1mystr2"));
+
+  // cancellation
+  {
+    winrt::com_ptr<IFabricAsyncOperationCallback> callback = winrt::make<Callback>();
+    winrt::com_ptr<IFabricAsyncOperationContext> ctx;
+    hr = api->BeginConcatStrings(s1.get(), s2.get(), 1000, callback.get(), ctx.put());
+    assert(hr == S_OK);
+    assert(ctx);
+    
+    // try end immediately and check ec
+    winrt::com_ptr<IFabricStringsBytes> s_temp;
+    hr = api->EndConcatStrings(ctx.get(), s_temp.put());
+    assert(hr == FABRIC_E_OPERATION_NOT_COMPLETE); 
+
+    // cancel operation
+    hr = ctx->Cancel();
+    assert(hr == S_OK);
+    while(1){
+      if(!ctx->IsCompleted()){
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+      }else{
+        break;
+      }
+    }
+    winrt::com_ptr<IFabricStringsBytes> s3;
+    hr = api->EndConcatStrings(ctx.get(), s3.put());
+    assert(hr == E_ABORT);
+  }
 }
