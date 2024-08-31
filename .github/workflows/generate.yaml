@@ -17,9 +17,10 @@ jobs:
       uses: lukka/get-cmake@v3.27.9
 
     - name: Install rust stable
-      uses: actions-rs/toolchain@v1
+      uses: dtolnay/rust-toolchain@stable
       with:
-        toolchain: stable
+        toolchain: 1.79.0
+        components: rustfmt, clippy
 
     - name: cmake configure
       run: > 

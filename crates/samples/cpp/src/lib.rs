@@ -22,6 +22,11 @@ lazy_static::lazy_static! {
 }
 
 // implementation of module
+
+/// # Safety
+/// This api should be called from C/Cpp code.
+///
+/// Entry point of the library
 #[no_mangle]
 pub unsafe extern "system" fn GetFabricStringsApiTable(
     out: *mut *mut IFabricStringsApiTable,
@@ -77,6 +82,7 @@ impl StringImpl {
 }
 
 impl IFabricStringsBytes_Impl for StringImpl {
+    #[allow(clippy::not_unsafe_ptr_arg_deref)]
     fn GetBytes(&self, buffer: *mut *mut u8, buffersize: *mut u32) {
         assert!(!buffer.is_null());
         assert!(!buffersize.is_null());

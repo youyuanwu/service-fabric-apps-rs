@@ -27,6 +27,8 @@ use lazy_static::lazy_static;
 static PERMIT: Semaphore = Semaphore::const_new(1);
 static TIMEOUT_LONG: Duration = Duration::from_secs(10);
 static TIMEOUT: Duration = Duration::from_secs(1);
+static RETRY_COUNT_LONG: usize = 30;
+static RETRY_COUNT_SHORT: usize = 10;
 static SVC_URI: &str = "fabric:/KvMap/KvMapService";
 lazy_static! {
     static ref KV_MAP_SVC_URI: HSTRING = HSTRING::from(SVC_URI);
@@ -101,7 +103,7 @@ impl KvMapMgmt {
     }
 
     pub async fn get_addrs_retry(&self) -> (String, String) {
-        for _ in 1..30 {
+        for _ in 0..RETRY_COUNT_LONG {
             if let Ok(addrs) = self.get_addrs().await {
                 return addrs;
             }
@@ -134,7 +136,7 @@ impl KvMapMgmt {
     }
 
     pub async fn get_partition_wait_ready(&self) -> (GUID, ServicePartitionStatus) {
-        for _ in 0..10 {
+        for _ in 0..RETRY_COUNT_LONG {
             if let Ok((id, status)) = self.get_partition().await {
                 if status == ServicePartitionStatus::Ready {
                     return (id, status);
@@ -194,7 +196,7 @@ impl KvMapMgmt {
         StatefulServiceReplicaQueryResult,
         StatefulServiceReplicaQueryResult,
     ) {
-        for _ in 0..10 {
+        for _ in 0..RETRY_COUNT_LONG {
             if let Ok((p, s)) = self.get_replicas(partition_id).await {
                 if s.replica_status == QueryServiceReplicaStatus::Ready
                     && p.replica_status == QueryServiceReplicaStatus::Ready
@@ -301,7 +303,7 @@ async fn failover_test() {
         .await;
 
     // wait for replica id change of secondary
-    for i in 0..10 {
+    for i in 0..RETRY_COUNT_SHORT {
         let (p2, s2) = c.get_replicas_wait_healthy(partition_id).await;
         if s2.replica_id != secondary.replica_id {
             assert_eq!(p2.replica_id, primary.replica_id);
@@ -319,26 +321,26 @@ async fn failover_test() {
     // restart primary
     c.restart_replica(primary.node_name, partition_id, primary.replica_id)
         .await;
-    for i in 0..10 {
+    for i in 0..RETRY_COUNT_SHORT {
         let (p3, _) = c.get_replicas_wait_healthy(partition_id).await;
 
         if p3.replica_id != primary.replica_id {
             break;
         }
 
-        if i == 10 {
+        if i == RETRY_COUNT_SHORT {
             panic!("primary replica id did not change");
         }
         tokio::time::sleep(TIMEOUT).await;
     }
 
     // wait for addr change of primary
-    for i in 0..10 {
+    for i in 0..RETRY_COUNT_SHORT {
         let (p_addr2, _) = c.get_addrs_retry().await;
         if p_addr != p_addr2 {
             break;
         }
-        if i == 10 {
+        if i == RETRY_COUNT_SHORT {
             panic!("primary addr did not change");
         }
         tokio::time::sleep(TIMEOUT).await;
