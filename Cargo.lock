@@ -800,6 +800,7 @@ dependencies = [
  "mssf-ext",
  "prost",
  "prost-build",
+ "tokio",
  "tonic",
  "tonic-build",
 ]

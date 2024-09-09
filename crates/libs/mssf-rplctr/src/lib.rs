@@ -2,6 +2,8 @@
 
 pub mod rpc;
 pub mod rplctr;
+pub mod rplctr_inner;
+pub mod state_rplctr;
 
 // use mssf_core::runtime::stateful::PrimaryReplicator;
 // use rplctr::Rplctr;

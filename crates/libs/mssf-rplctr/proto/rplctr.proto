@@ -10,12 +10,12 @@ package rplctr_rpc;
 
 message empty_payload{}
 
-message operation_request{
+message rpc_operation_request{
   bytes data = 1;
   int32 sn = 2;
 }
 
-message operation_response{
+message rpc_operation_response{
   int32 sn = 1;
   bool ack = 2;
 }
@@ -23,5 +23,5 @@ message operation_response{
 service rplctr_service {
   // primary send data to secondary
   // primary uses the client and secondary is the server
-  rpc replicate(stream operation_request) returns (operation_response){}
+  rpc replicate(rpc_operation_request) returns (rpc_operation_response){}
 }

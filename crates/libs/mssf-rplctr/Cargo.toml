@@ -9,6 +9,7 @@ mssf-ext.workspace = true
 bytes.workspace = true
 tonic.workspace = true
 prost.workspace = true
+tokio.workspace = true
 
 [build-dependencies]
 tonic-build.workspace = true

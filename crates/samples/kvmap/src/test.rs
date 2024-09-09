@@ -172,7 +172,10 @@ impl KvMapMgmt {
                 _ => panic!("not stateful"),
             })
             .collect::<Vec<_>>();
-        assert_eq!(replicas.len(), 2);
+        if replicas.len() < 2 {
+            // not yet ready
+            return Err(FabricErrorCode::OperationFailed.into());
+        }
 
         let primary = replicas
             .iter()
@@ -297,7 +300,7 @@ async fn failover_test() {
     let (partition_id, status) = c.get_partition_wait_ready().await;
     assert_eq!(status, ServicePartitionStatus::Ready);
 
-    let (primary, secondary) = c.get_replicas(partition_id).await.unwrap();
+    let (primary, secondary) = c.get_replicas_wait_healthy(partition_id).await;
     // restart secondary
     c.restart_replica(secondary.node_name, partition_id, secondary.replica_id)
         .await;

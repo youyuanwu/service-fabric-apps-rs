@@ -64,10 +64,14 @@ jobs:
       run: |
         Powershell.exe -File scripts/rcstore_ctl.ps1 -Action Add
         Powershell.exe -File scripts/kvmap_ctl.ps1 -Action Add
+        Start-Sleep -Seconds 30
+      shell: pwsh
     # todo: may need to sleep to wait for app to be up. but test compilation may take some time.
 
     - name: run all unittests
       run: cargo test --all
+      env:
+        RUST_BACKTRACE: '1'
 
     - name: run rcstore cli
       shell: pwsh
