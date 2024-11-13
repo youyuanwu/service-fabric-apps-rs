@@ -8,8 +8,8 @@ members = [
 
 [workspace.dependencies]
 mssf-ext = {path = "./crates/libs/mssf-ext"}
-mssf-com = {version = "0.0.9"}
-mssf-core = "0.0.9"
+mssf-com = {version = "0.0.15"}
+mssf-core = "0.0.15"
 windows = {version = "0.57", features = [ "Win32_Foundation" ]}
 windows-core = "0.57"
 windows-bindgen = "0.57"

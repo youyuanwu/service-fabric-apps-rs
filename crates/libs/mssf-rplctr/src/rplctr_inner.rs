@@ -55,7 +55,7 @@ impl<T: StateProvider> RplctrInner<T> {
         self.sec_rplct_stream_tx
             .send((sn, data))
             .await
-            .map_err(|_| FabricErrorCode::OperationFailed.into())
+            .map_err(|_| FabricErrorCode::E_FAIL.into())
     }
 
     // open rpc server and block current task.

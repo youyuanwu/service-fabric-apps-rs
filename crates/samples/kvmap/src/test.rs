@@ -32,7 +32,7 @@ static RETRY_COUNT_SHORT: usize = 10;
 static SVC_URI: &str = "fabric:/KvMap/KvMapService";
 lazy_static! {
     static ref KV_MAP_SVC_URI: HSTRING = HSTRING::from(SVC_URI);
-    static ref FABRIC_CLIENT: FabricClient = FabricClient::new();
+    static ref FABRIC_CLIENT: FabricClient = FabricClient::builder().build();
 }
 
 // helper for managing app
@@ -93,7 +93,7 @@ impl KvMapMgmt {
             .iter()
             .find(|e| e.role == ServiceEndpointRole::StatefulSecondary);
         if primary_addr.is_none() || secondary_addr.is_none() {
-            Err(FabricErrorCode::OperationFailed.into())
+            Err(FabricErrorCode::E_FAIL.into())
         } else {
             Ok((
                 primary_addr.unwrap().address.to_string(),
@@ -174,20 +174,20 @@ impl KvMapMgmt {
             .collect::<Vec<_>>();
         if replicas.len() < 2 {
             // not yet ready
-            return Err(FabricErrorCode::OperationFailed.into());
+            return Err(FabricErrorCode::E_FAIL.into());
         }
 
         let primary = replicas
             .iter()
             .find(|r| r.replica_role == ReplicaRole::Primary);
         if primary.is_none() {
-            return Err(FabricErrorCode::OperationFailed.into());
+            return Err(FabricErrorCode::E_FAIL.into());
         }
         let secondary = replicas
             .iter()
             .find(|r| r.replica_role != ReplicaRole::Primary);
         if secondary.is_none() {
-            return Err(FabricErrorCode::OperationFailed.into());
+            return Err(FabricErrorCode::E_FAIL.into());
         }
         Ok((primary.unwrap().clone(), secondary.unwrap().clone()))
     }

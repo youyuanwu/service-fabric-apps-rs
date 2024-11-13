@@ -8,7 +8,7 @@ use mssf_core::{
     debug::wait_for_debugger,
     runtime::{
         executor::{DefaultExecutor, Executor},
-        ActivationContext,
+        CodePackageActivationContext,
     },
 };
 use sfrc_core::wrap::ReliableCollectionRuntime;
@@ -46,7 +46,7 @@ fn main() -> windows::core::Result<()> {
 
     let e = DefaultExecutor::new(rt.handle().clone());
     let runtime = mssf_core::runtime::Runtime::create(e.clone()).unwrap();
-    let actctx = ActivationContext::create().unwrap();
+    let actctx = CodePackageActivationContext::create().unwrap();
     let rplctr_endpoint = actctx
         .get_endpoint_resource(&HSTRING::from("ReplicatorEndpoint"))
         .unwrap();

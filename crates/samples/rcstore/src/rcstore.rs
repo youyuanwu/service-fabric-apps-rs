@@ -465,7 +465,7 @@ pub mod rpc {
         #[tokio::test]
         async fn test_connect() {
             // resolve port on local onebox
-            let fc = FabricClient::new();
+            let fc = FabricClient::builder().build();
             let svcc = fc.get_service_manager();
             let resolution = svcc
                 .resolve_service_partition(

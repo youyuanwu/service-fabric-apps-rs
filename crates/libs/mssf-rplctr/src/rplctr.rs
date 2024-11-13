@@ -4,7 +4,7 @@ use mssf_core::{
     runtime::{
         executor::DefaultExecutor,
         stateful::{PrimaryReplicator, Replicator},
-        stateful_types::{Epoch, ReplicaInfo, ReplicaSetConfig, ReplicaSetQuarumMode},
+        stateful_types::{Epoch, ReplicaInformation, ReplicaSetConfig, ReplicaSetQuarumMode},
         store_types::ReplicatorSettings,
     },
     sync::CancellationToken,
@@ -132,7 +132,7 @@ impl<T: StateProvider> PrimaryReplicator for Rplctr<T> {
     }
     async fn build_replica(
         &self,
-        _replica: &ReplicaInfo,
+        _replica: &ReplicaInformation,
         _: CancellationToken,
     ) -> mssf_core::Result<()> {
         todo!()

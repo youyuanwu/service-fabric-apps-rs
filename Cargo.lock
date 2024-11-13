@@ -734,9 +734,9 @@ dependencies = [
 
 [[package]]
 name = "mssf-com"
-version = "0.0.9"
+version = "0.0.15"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "351a39438a048aab1e454402ddb6f759e6e9df7840c034e5d2d1e69cd9c3c387"
+checksum = "0ccd6e9b49a391fde2ac6b07b20d477ef6c6138ece1fb7ed7235016e668a5dcf"
 dependencies = [
  "mssf-metadata",
  "mssf-pal",
@@ -746,9 +746,9 @@ dependencies = [
 
 [[package]]
 name = "mssf-core"
-version = "0.0.9"
+version = "0.0.15"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "df628034e4fee3157fed8a1b264afbc353d6c67c478f0be73b0f907d169e2750"
+checksum = "b6568b87c27488e680d49894981eed178ccb6af64690a23ed1b152c1f8046bf9"
 dependencies = [
  "bitflags",
  "config",
@@ -783,9 +783,9 @@ checksum = "39323a0ee935ad85894e31a9f42f2f41f5db403b7d2312d85e77b5a99eb8552d"
 
 [[package]]
 name = "mssf-pal"
-version = "0.0.9"
+version = "0.0.15"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ae2e0b27923badc7bb865f66767661fa7330ae804c8a84fe22eecd263b6b0ee7"
+checksum = "e3a34574d346fdc1574a0ad15b33f582eaa0d690d1962ab43255f16df0120796"
 dependencies = [
  "libc",
  "windows",

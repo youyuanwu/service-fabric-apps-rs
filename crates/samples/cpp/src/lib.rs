@@ -110,7 +110,7 @@ impl ApiTable {
         let sleep = std::cmp::min(default_duration, timeout);
 
         tokio::select! {
-            _ = cancellation_token.cancelled() => { Err(FabricErrorCode::OperationCanceled.into()) }
+            _ = cancellation_token.cancelled() => { Err(FabricErrorCode::E_ABORT.into()) }
             _ = tokio::time::sleep(sleep) => {
                 if timeout < default_duration{
                     Err(mssf_core::error::FabricError::from(FABRIC_E_TIMEOUT).into())
