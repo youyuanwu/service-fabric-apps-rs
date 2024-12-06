@@ -4,8 +4,8 @@ use std::sync::Arc;
 
 use bytes::{Buf, BytesMut};
 use mssf_core::{
-    runtime::store_types::ReplicatorSettings,
     sync::{CancellationToken, FabricReceiver2},
+    types::ReplicatorSettings,
 };
 use mssf_ext::traits::{Operation, OperationData, OperationStream, StateProvider, StateReplicator};
 

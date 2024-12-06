@@ -1,7 +1,7 @@
 use bytes::Buf;
 use mssf_core::{
-    runtime::{stateful_types::Epoch, store_types::ReplicatorSettings},
     sync::{CancellationToken, FabricReceiver2},
+    types::{Epoch, ReplicatorSettings},
 };
 
 use crate::types::OperationMetadata;

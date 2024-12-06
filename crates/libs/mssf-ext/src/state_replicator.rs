@@ -1,7 +1,7 @@
 use mssf_com::FabricRuntime::{IFabricOperationData, IFabricStateReplicator2};
 use mssf_core::{
-    runtime::store_types::ReplicatorSettings,
     sync::{fabric_begin_end_proxy2, CancellationToken, FabricReceiver2},
+    types::ReplicatorSettings,
 };
 
 use crate::{

@@ -21,7 +21,7 @@ jobs:
     - name: Install rust stable
       uses: dtolnay/rust-toolchain@stable
       with:
-        toolchain: 1.79.0
+        toolchain: 1.82.0
         components: rustfmt, clippy
 
     - name: run cmake
@@ -36,7 +36,7 @@ jobs:
       run: cargo fmt --all -- --check
     
     - name: Run cargo clippy
-      run: cargo clippy -- -D warnings   
+      run: cargo clippy --all-targets -- -D warnings   
 
     - name: run build
       run: |
@@ -124,7 +124,7 @@ jobs:
       run: cargo fmt --all -- --check
     
     - name: Run cargo clippy
-      run: cargo clippy -- -D warnings   
+      run: cargo clippy --all-targets -- -D warnings   
 
     - name: run build
       run: cmake --build build --config ${{ matrix.BUILD_TYPE }}

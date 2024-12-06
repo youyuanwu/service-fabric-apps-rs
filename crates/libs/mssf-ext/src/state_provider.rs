@@ -5,10 +5,7 @@ use mssf_com::{
     FabricRuntime::{IFabricOperationDataStream, IFabricStateProvider, IFabricStateProvider_Impl},
     FabricTypes::FABRIC_EPOCH,
 };
-use mssf_core::{
-    runtime::{executor::Executor, stateful_types::Epoch},
-    sync::BridgeContext3,
-};
+use mssf_core::{runtime::executor::Executor, sync::BridgeContext3, types::Epoch};
 use tracing::info;
 use windows_core::implement;
 

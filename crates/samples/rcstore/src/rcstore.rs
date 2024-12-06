@@ -14,15 +14,11 @@ use tracing::info;
 use mssf_core::{
     runtime::{
         executor::{DefaultExecutor, Executor},
-        stateful::{
-            PrimaryReplicator, StatefulServiceFactory, StatefulServicePartition,
-            StatefulServiceReplica,
-        },
-        stateful_proxy::PrimaryReplicatorProxy,
-        stateful_types::OpenMode,
+        stateful::{PrimaryReplicator, StatefulServiceFactory, StatefulServiceReplica},
+        stateful_proxy::{PrimaryReplicatorProxy, StatefulServicePartition},
     },
     sync::CancellationToken,
-    types::ReplicaRole,
+    types::{OpenMode, ReplicaRole},
 };
 use sfrc_c::ReliableCollectionRuntime::{IFabricDataLossHandler, TxnReplicator_Settings};
 use sfrc_core::wrap::{get_txn_replicator, TxnReplicaReplicator};

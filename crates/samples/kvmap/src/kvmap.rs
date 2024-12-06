@@ -8,14 +8,10 @@ use mssf_com::{
 use mssf_core::{
     runtime::{
         executor::{DefaultExecutor, Executor},
-        stateful::{
-            PrimaryReplicator, StatefulServiceFactory, StatefulServicePartition,
-            StatefulServiceReplica,
-        },
-        stateful_proxy::PrimaryReplicatorProxy,
-        stateful_types::{Epoch, OpenMode},
+        stateful::{PrimaryReplicator, StatefulServiceFactory, StatefulServiceReplica},
+        stateful_proxy::{PrimaryReplicatorProxy, StatefulServicePartition},
     },
-    types::ReplicaRole,
+    types::{Epoch, OpenMode, ReplicaRole},
     GUID, HSTRING,
 };
 use mssf_ext::{
@@ -392,7 +388,7 @@ impl StatefulServiceReplica for Replica {
                         );
                     }
                     info!("KvStateProvider: Completed copy stream catchup on idle secondary.")
-                })
+                });
             }
             ReplicaRole::None => {
                 // delete stuff on disk?

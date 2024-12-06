@@ -4,11 +4,12 @@ use mssf_core::{
     runtime::{
         executor::DefaultExecutor,
         stateful::{PrimaryReplicator, Replicator},
-        stateful_types::{Epoch, ReplicaInformation, ReplicaSetConfig, ReplicaSetQuarumMode},
-        store_types::ReplicatorSettings,
     },
     sync::CancellationToken,
-    types::ReplicaRole,
+    types::{
+        Epoch, ReplicaInformation, ReplicaRole, ReplicaSetConfig, ReplicaSetQuorumMode,
+        ReplicatorSettings,
+    },
     HSTRING,
 };
 use mssf_ext::traits::{StateProvider, StateReplicator};
@@ -119,7 +120,7 @@ impl<T: StateProvider> PrimaryReplicator for Rplctr<T> {
     }
     async fn wait_for_catch_up_quorum(
         &self,
-        _catchupmode: ReplicaSetQuarumMode,
+        _catchupmode: ReplicaSetQuorumMode,
         _: CancellationToken,
     ) -> mssf_core::Result<()> {
         todo!()

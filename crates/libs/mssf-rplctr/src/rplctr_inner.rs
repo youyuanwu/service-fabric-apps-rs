@@ -3,9 +3,9 @@ use std::sync::Arc;
 use bytes::Bytes;
 use mssf_core::{
     error::FabricErrorCode,
-    runtime::{executor::DefaultExecutor, stateful_types::Epoch, store_types::ReplicatorSettings},
+    runtime::executor::DefaultExecutor,
     sync::CancellationToken,
-    types::ReplicaRole,
+    types::{Epoch, ReplicaRole, ReplicatorSettings},
 };
 use mssf_ext::traits::{Operation, OperationStream, StateProvider};
 use tokio::sync::mpsc;

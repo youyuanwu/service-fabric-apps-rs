@@ -11,9 +11,9 @@ use mssf_core::{
     error::FabricErrorCode,
     types::{
         QueryServiceReplicaStatus, ReplicaRole, RestartReplicaDescription,
-        ServiceNotificationFilterDescription, ServiceNotificationFilterFlags, ServicePartition,
-        ServicePartitionInformation, ServicePartitionQueryDescription, ServicePartitionStatus,
-        ServiceReplicaQueryDescription, ServiceReplicaQueryResult,
+        ServiceNotificationFilterDescription, ServiceNotificationFilterFlags,
+        ServicePartitionInformation, ServicePartitionQueryDescription, ServicePartitionQueryResult,
+        ServicePartitionStatus, ServiceReplicaQueryDescription, ServiceReplicaQueryResult,
         StatefulServiceReplicaQueryResult,
     },
     GUID, HSTRING,
@@ -92,6 +92,7 @@ impl KvMapMgmt {
         let secondary_addr = endpoints
             .iter()
             .find(|e| e.role == ServiceEndpointRole::StatefulSecondary);
+        #[allow(clippy::unnecessary_unwrap)]
         if primary_addr.is_none() || secondary_addr.is_none() {
             Err(FabricErrorCode::E_FAIL.into())
         } else {
@@ -124,7 +125,7 @@ impl KvMapMgmt {
         // there is only one partition
         let p = list.iter().next().unwrap();
         let stateful = match p {
-            ServicePartition::Stateful(s) => s,
+            ServicePartitionQueryResult::Stateful(s) => s,
             _ => panic!("not stateless"),
         };
         let info = stateful.partition_information;
@@ -156,7 +157,7 @@ impl KvMapMgmt {
         StatefulServiceReplicaQueryResult,
     )> {
         let desc = ServiceReplicaQueryDescription {
-            partition_id: partition_id,
+            partition_id,
             replica_id_or_instance_id_filter: None,
         };
 
@@ -214,8 +215,8 @@ impl KvMapMgmt {
 
     pub async fn restart_replica(&self, node_name: HSTRING, partition_id: GUID, replica_id: i64) {
         let desc = RestartReplicaDescription {
-            node_name: node_name,
-            partition_id: partition_id,
+            node_name,
+            partition_id,
             replica_or_instance_id: replica_id,
         };
         self.svc
