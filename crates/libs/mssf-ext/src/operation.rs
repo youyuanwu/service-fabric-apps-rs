@@ -38,7 +38,7 @@ impl Operation for OperationProxy {
 #[implement(IFabricOperationData)]
 struct IFabricOperationWrapForData(IFabricOperation);
 
-impl IFabricOperationData_Impl for IFabricOperationWrapForData {
+impl IFabricOperationData_Impl for IFabricOperationWrapForData_Impl {
     fn GetData(&self, count: *mut u32) -> windows_core::Result<*mut FABRIC_OPERATION_DATA_BUFFER> {
         unsafe { self.0.GetData(count) }
     }

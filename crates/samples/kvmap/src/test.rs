@@ -16,7 +16,7 @@ use mssf_core::{
         ServicePartitionStatus, ServiceReplicaQueryDescription, ServiceReplicaQueryResult,
         StatefulServiceReplicaQueryResult,
     },
-    GUID, HSTRING,
+    WString, GUID,
 };
 use tokio::sync::Semaphore;
 
@@ -31,7 +31,7 @@ static RETRY_COUNT_LONG: usize = 30;
 static RETRY_COUNT_SHORT: usize = 10;
 static SVC_URI: &str = "fabric:/KvMap/KvMapService";
 lazy_static! {
-    static ref KV_MAP_SVC_URI: HSTRING = HSTRING::from(SVC_URI);
+    static ref KV_MAP_SVC_URI: WString = WString::from(SVC_URI);
     static ref FABRIC_CLIENT: FabricClient = FabricClient::builder().build();
 }
 
@@ -51,7 +51,7 @@ impl KvMapMgmt {
 
     pub async fn register_notification(&self) -> FilterIdHandle {
         let desc = ServiceNotificationFilterDescription {
-            name: HSTRING::from(SVC_URI),
+            name: WString::from(SVC_URI),
             flags: ServiceNotificationFilterFlags::NamePrefix,
         };
         // register takes more than 1 sec.
@@ -213,7 +213,7 @@ impl KvMapMgmt {
         panic!("replicas not found or not healthy");
     }
 
-    pub async fn restart_replica(&self, node_name: HSTRING, partition_id: GUID, replica_id: i64) {
+    pub async fn restart_replica(&self, node_name: WString, partition_id: GUID, replica_id: i64) {
         let desc = RestartReplicaDescription {
             node_name,
             partition_id,

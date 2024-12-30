@@ -10,7 +10,7 @@ use mssf_core::{
         Epoch, ReplicaInformation, ReplicaRole, ReplicaSetConfig, ReplicaSetQuorumMode,
         ReplicatorSettings,
     },
-    HSTRING,
+    WString,
 };
 use mssf_ext::traits::{StateProvider, StateReplicator};
 use tokio::task::JoinHandle;
@@ -44,7 +44,7 @@ impl<T: StateProvider> Rplctr<T> {
 }
 
 impl<T: StateProvider> Replicator for Rplctr<T> {
-    async fn open(&self, _: CancellationToken) -> mssf_core::Result<HSTRING> {
+    async fn open(&self, _: CancellationToken) -> mssf_core::Result<WString> {
         // start rpc server
         let close_token = CancellationToken::new();
         let close_token_cp = close_token.clone();
@@ -56,7 +56,7 @@ impl<T: StateProvider> Replicator for Rplctr<T> {
         assert!(prev.is_none());
         let prev_h = self.close_wait.lock().unwrap().replace(Some(close_handle));
         assert!(prev_h.is_none());
-        Ok(HSTRING::from(self.inner.get_addr()))
+        Ok(WString::from(self.inner.get_addr()))
     }
     async fn close(&self, _: CancellationToken) -> mssf_core::Result<()> {
         // cancel background server

@@ -4,14 +4,13 @@ version = "0.1.0"
 edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+[dependencies]
+mssf-com.workspace = true
+mssf-core.workspace = true
+# tokio oneshot
+tokio = { version = "1", features = ["sync"] }
+windows-core.workspace = true
 
 [dependencies.sfrc-c]
 path = "../c"
 
-[dependencies]
-mssf-com.workspace = true
-# need to define some com interfaces
-windows.workspace = true
-
-# tokio oneshot
-tokio = { version = "1", features = ["sync"] }

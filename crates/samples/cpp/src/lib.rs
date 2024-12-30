@@ -81,7 +81,7 @@ impl StringImpl {
     }
 }
 
-impl IFabricStringsBytes_Impl for StringImpl {
+impl IFabricStringsBytes_Impl for StringImpl_Impl {
     #[allow(clippy::not_unsafe_ptr_arg_deref)]
     fn GetBytes(&self, buffer: *mut *mut u8, buffersize: *mut u32) {
         assert!(!buffer.is_null());
@@ -141,7 +141,7 @@ impl ApiTableBridge {
     }
 }
 
-impl IFabricStringsApiTable_Impl for ApiTableBridge {
+impl IFabricStringsApiTable_Impl for ApiTableBridge_Impl {
     fn BeginConcatStrings(
         &self,
         str1: Option<&FabricStrings::IFabricStringsBytes>,

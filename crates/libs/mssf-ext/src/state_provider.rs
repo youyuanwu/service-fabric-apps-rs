@@ -39,7 +39,7 @@ where
     }
 }
 
-impl<T: StateProvider, E: Executor> IFabricStateProvider_Impl for StateProviderBridge<T, E> {
+impl<T: StateProvider, E: Executor> IFabricStateProvider_Impl for StateProviderBridge_Impl<T, E> {
     #[allow(clippy::not_unsafe_ptr_arg_deref)]
     fn BeginUpdateEpoch(
         &self,

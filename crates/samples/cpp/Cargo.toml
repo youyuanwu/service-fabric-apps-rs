@@ -18,4 +18,3 @@ mssf-com.workspace = true
 mssf-core.workspace = true
 tokio.workspace = true
 lazy_static.workspace = true
-[dev-dependencies]

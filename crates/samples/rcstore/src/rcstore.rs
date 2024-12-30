@@ -19,12 +19,13 @@ use mssf_core::{
     },
     sync::CancellationToken,
     types::{OpenMode, ReplicaRole},
+    GUID,
 };
+use mssf_core::{Error, WString};
 use sfrc_c::ReliableCollectionRuntime::{IFabricDataLossHandler, TxnReplicator_Settings};
 use sfrc_core::wrap::{get_txn_replicator, TxnReplicaReplicator};
 use tokio::sync::oneshot::{self, Sender};
 use tonic::transport::Server;
-use windows_core::{Error, HSTRING};
 
 use crate::utils::DataLossHandler;
 
@@ -44,7 +45,7 @@ impl Factory {
     }
 }
 
-fn get_addr(port: u32, hostname: HSTRING) -> String {
+fn get_addr(port: u32, hostname: WString) -> String {
     let mut addr = String::new();
     addr.push_str(&hostname.to_string());
     addr.push(':');
@@ -55,10 +56,10 @@ fn get_addr(port: u32, hostname: HSTRING) -> String {
 impl StatefulServiceFactory for Factory {
     fn create_replica(
         &self,
-        servicetypename: &windows_core::HSTRING,
-        servicename: &windows_core::HSTRING,
+        servicetypename: &WString,
+        servicename: &WString,
         initializationdata: &[u8],
-        partitionid: &windows::core::GUID,
+        partitionid: &GUID,
         replicaid: i64,
     ) -> Result<impl StatefulServiceReplica, Error> {
         info!(
@@ -160,14 +161,14 @@ impl StatefulServiceReplica for Replica {
         openmode: OpenMode,
         partition: &StatefulServicePartition,
         _: CancellationToken,
-    ) -> windows::core::Result<impl PrimaryReplicator> {
+    ) -> mssf_core::Result<impl PrimaryReplicator> {
         // should be primary replicator
         info!("Replica::open {:?}", openmode);
 
         let dataloss_handler: IFabricDataLossHandler = DataLossHandler {}.into();
 
-        let addr = get_addr(self.rplc_port, HSTRING::from("localhost"));
-        let waddr = HSTRING::from(addr);
+        let addr = get_addr(self.rplc_port, WString::from("localhost"));
+        let waddr = WString::from(addr);
 
         let txn_settings = TxnReplicator_Settings {
             ReplicatorAddress: waddr.as_ptr() as *mut c_void,
@@ -179,9 +180,9 @@ impl StatefulServiceReplica for Replica {
             partition.get_com(),
             &dataloss_handler,
             &txn_settings,
-            &HSTRING::new(),
-            &HSTRING::new(),
-            &HSTRING::new(),
+            &WString::new(),
+            &WString::new(),
+            &WString::new(),
         );
         if ok.is_err() {
             let e = ok.err().unwrap();
@@ -199,16 +200,16 @@ impl StatefulServiceReplica for Replica {
         &self,
         newrole: ReplicaRole,
         _: CancellationToken,
-    ) -> ::windows_core::Result<HSTRING> {
+    ) -> mssf_core::Result<WString> {
         info!("Replica::change_role {:?}", newrole);
 
         if newrole == ReplicaRole::Primary {
             self.svc.start_loop();
         }
-        let addr = HSTRING::from(format!("http://localhost:{}", self.grpc_port));
+        let addr = WString::from(format!("http://localhost:{}", self.grpc_port));
         Ok(addr)
     }
-    async fn close(&self, _: CancellationToken) -> windows::core::Result<()> {
+    async fn close(&self, _: CancellationToken) -> mssf_core::Result<()> {
         info!("Replica::close");
         self.svc.stop();
         Ok(())
@@ -224,14 +225,14 @@ impl StatefulServiceReplica for Replica {
 pub mod rpc {
     use std::sync::Arc;
 
+    use mssf_core::error::FabricErrorCode::E_NOT_FOUND;
+    use mssf_core::{Error, WString, PCWSTR};
     use sfrc_c::ReliableCollectionRuntime::{
         StateProvider_Info, StateProvider_Info_V1_Size, StateProvider_Kind_Store,
         Store_LockMode_Exclusive,
     };
     use sfrc_core::wrap::{StateProvider, TxnReplicaReplicator};
     use tonic::async_trait;
-    use windows::Win32::Foundation::ERROR_NOT_FOUND;
-    use windows_core::{Error, HSTRING, PCWSTR};
 
     tonic::include_proto!("rcstore_rpc"); // The string specified here must match the proto package name
 
@@ -244,14 +245,14 @@ pub mod rpc {
             rpc_svc { store }
         }
 
-        async fn get_state_provider(&self, url: &HSTRING) -> Result<StateProvider, Error> {
+        async fn get_state_provider(&self, url: &WString) -> Result<StateProvider, Error> {
             let txn = self.store.create_transaction().unwrap();
             let waiter;
             {
                 let timeout = 3000;
 
                 let store_name = url;
-                let lang = HSTRING::default();
+                let lang = WString::default();
                 let stateproviderinfo = StateProvider_Info {
                     Size: StateProvider_Info_V1_Size,
                     Kind: StateProvider_Kind_Store,
@@ -274,7 +275,7 @@ pub mod rpc {
         async fn add_interal(
             &self,
             sp: &StateProvider,
-            key: &HSTRING,
+            key: &WString,
             val: String,
         ) -> Result<(), Error> {
             let txnn = self.store.create_transaction()?;
@@ -283,14 +284,14 @@ pub mod rpc {
             txnn.commit_async().await.unwrap()
         }
 
-        async fn get_internal(&self, sp: &StateProvider, key: &HSTRING) -> Result<String, Error> {
+        async fn get_internal(&self, sp: &StateProvider, key: &WString) -> Result<String, Error> {
             let txn = self.store.create_transaction()?;
             let waiter = sp.conditional_get_async(&txn, key, 3000, Store_LockMode_Exclusive);
             let (found, val, _) = waiter.await.unwrap()?;
             txn.commit_async().await.unwrap()?;
 
-            if !found.as_bool() {
-                Err(Error::from(ERROR_NOT_FOUND))
+            if found.0 == 0 {
+                Err(Error::from(E_NOT_FOUND))
             } else {
                 Ok(String::from_utf8_lossy(val.as_slice()).into_owned())
             }
@@ -299,14 +300,14 @@ pub mod rpc {
         async fn remove_internal(
             &self,
             sp: &StateProvider,
-            key: &HSTRING,
+            key: &WString,
             conditionalversion: i64,
         ) -> Result<bool, Error> {
             let txn = self.store.create_transaction()?;
             let waiter = sp.conditional_remove_async(&txn, key, 3000, conditionalversion);
             let removed = waiter.await.unwrap()?;
             txn.commit_async().await.unwrap()?;
-            Ok(removed.as_bool())
+            Ok(removed.0 != 0)
         }
 
         async fn enumerate_all_internal(
@@ -320,7 +321,7 @@ pub mod rpc {
 
             loop {
                 let (advanced, key, data, _) = enu.move_next_async().await.unwrap()?;
-                if !advanced.as_bool() {
+                if advanced.0 == 0 {
                     break;
                 }
                 result.push((
@@ -340,7 +341,7 @@ pub mod rpc {
             request: tonic::Request<AddRequest>,
         ) -> std::result::Result<tonic::Response<AddResponse>, tonic::Status> {
             let req = request.into_inner();
-            let store_url = HSTRING::from(req.store_url);
+            let store_url = WString::from(req.store_url);
             let sp = self.get_state_provider(&store_url).await;
             if sp.is_err() {
                 return Err(tonic::Status::internal(format!(
@@ -350,7 +351,7 @@ pub mod rpc {
             }
             let sp = sp.unwrap();
 
-            let key = HSTRING::from(req.key);
+            let key = WString::from(req.key);
             let val = req.val;
 
             let ok = self.add_interal(&sp, &key, val).await;
@@ -367,7 +368,7 @@ pub mod rpc {
             request: tonic::Request<GetRequest>,
         ) -> std::result::Result<tonic::Response<GetResponse>, tonic::Status> {
             let req = request.into_inner();
-            let store_url = HSTRING::from(req.store_url);
+            let store_url = WString::from(req.store_url);
             let sp = self.get_state_provider(&store_url).await;
             if sp.is_err() {
                 return Err(tonic::Status::internal(format!(
@@ -377,7 +378,7 @@ pub mod rpc {
             }
             let sp = sp.unwrap();
 
-            let key = HSTRING::from(req.key);
+            let key = WString::from(req.key);
 
             let ok = self.get_internal(&sp, &key).await;
             match ok {
@@ -393,7 +394,7 @@ pub mod rpc {
             request: tonic::Request<RemoveRequest>,
         ) -> std::result::Result<tonic::Response<RemoveResponse>, tonic::Status> {
             let req = request.into_inner();
-            let store_url = HSTRING::from(req.store_url);
+            let store_url = WString::from(req.store_url);
             let sp = self.get_state_provider(&store_url).await;
             if sp.is_err() {
                 return Err(tonic::Status::internal(format!(
@@ -403,7 +404,7 @@ pub mod rpc {
             }
             let sp = sp.unwrap();
 
-            let key = HSTRING::from(req.key);
+            let key = WString::from(req.key);
             let conditionalversion = req.conditional_version;
 
             let ok = self.remove_internal(&sp, &key, conditionalversion).await;
@@ -421,7 +422,7 @@ pub mod rpc {
             request: tonic::Request<EnumerateRequest>,
         ) -> std::result::Result<tonic::Response<EnumerateResponse>, tonic::Status> {
             let req = request.into_inner();
-            let store_url = HSTRING::from(req.store_url);
+            let store_url = WString::from(req.store_url);
             let sp = self.get_state_provider(&store_url).await;
             if sp.is_err() {
                 return Err(tonic::Status::internal(format!(
@@ -455,7 +456,7 @@ pub mod rpc {
                 svc_mgmt_client::{PartitionKeyType, ServiceEndpointRole},
                 FabricClient,
             },
-            HSTRING,
+            WString,
         };
 
         #[tokio::test]
@@ -465,7 +466,7 @@ pub mod rpc {
             let svcc = fc.get_service_manager();
             let resolution = svcc
                 .resolve_service_partition(
-                    &HSTRING::from("fabric:/RcStore/RcStoreService"),
+                    &WString::from("fabric:/RcStore/RcStoreService"),
                     &PartitionKeyType::None,
                     None,
                     Duration::from_secs(1),

@@ -14,8 +14,8 @@ use mssf_core::{
         executor::{DefaultExecutor, Executor},
         CodePackageActivationContext,
     },
-    strings::HSTRINGWrap,
-    HSTRING,
+    strings::WStringWrap,
+    WString,
 };
 use tracing::info;
 
@@ -50,22 +50,22 @@ fn main() -> mssf_core::Result<()> {
     let runtime = mssf_core::runtime::Runtime::create(e.clone()).unwrap();
     let actctx = CodePackageActivationContext::create().unwrap();
     let endpoint = actctx
-        .get_endpoint_resource(&HSTRING::from("KvReplicatorEndpoint"))
+        .get_endpoint_resource(&WString::from("KvReplicatorEndpoint"))
         .unwrap();
     let rpc_endpoint = actctx
-        .get_endpoint_resource(&HSTRING::from("KvRpcEndpoint"))
+        .get_endpoint_resource(&WString::from("KvRpcEndpoint"))
         .unwrap();
-    let work_dir: HSTRINGWrap = unsafe { actctx.get_com().get_WorkDirectory() }.into();
+    let work_dir: WStringWrap = unsafe { actctx.get_com().get_WorkDirectory() }.into();
     let ctx = ProcCtx {
         rt: e.clone(),
         replication_port: endpoint.port,
         rpc_port: rpc_endpoint.port,
-        workdir: PathBuf::from(HSTRING::from(work_dir).to_string()),
+        workdir: PathBuf::from(WString::from(work_dir).to_string()),
     };
 
     let factory = Factory::create(ctx);
     runtime
-        .register_stateful_service_factory(&HSTRING::from("KvMapService"), factory)
+        .register_stateful_service_factory(&WString::from("KvMapService"), factory)
         .unwrap();
 
     e.run_until_ctrl_c();

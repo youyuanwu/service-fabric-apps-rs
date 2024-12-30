@@ -8,6 +8,7 @@ use core::slice;
 use std::{ffi::c_void, ptr::addr_of_mut};
 
 use mssf_com::FabricRuntime::{IFabricPrimaryReplicator, IFabricStatefulServicePartition};
+use mssf_core::{Error, Interface, WString, HRESULT, PCWSTR};
 use sfrc_c::ReliableCollectionRuntime::{
     fnNotifyAsyncCompletion, fnNotifyCreateEnumeratorAsyncCompletion, fnNotifyGetAsyncCompletion,
     fnNotifyGetOrAddStateProviderAsyncCompletion, fnNotifyRemoveAsyncCompletion,
@@ -24,11 +25,7 @@ use sfrc_c::ReliableCollectionRuntime::{
     TxnReplicator_Settings, RELIABLECOLLECTION_API_VERSION,
 };
 use tokio::sync::oneshot::{self, Receiver, Sender};
-use windows::{
-    core::{Error, Interface, HRESULT, HSTRING, PCWSTR},
-    Win32::Foundation::BOOL,
-};
-
+use windows_core::Win32::Foundation::BOOL;
 // do module init
 pub struct ReliableCollectionRuntime {}
 
@@ -44,7 +41,7 @@ impl ReliableCollectionRuntime {
         let ok = unsafe {
             ReliableCollectionRuntime_Initialize2(
                 RELIABLECOLLECTION_API_VERSION.try_into().unwrap(),
-                true,
+                BOOL(1),
             )
         };
         ok.expect("cannot init standalone");
@@ -82,10 +79,10 @@ impl TxnReplicaReplicator {
 
     unsafe extern "system" fn get_or_add_state_provider_callback(
         ctx: *mut ::core::ffi::c_void,
-        status: ::windows::core::HRESULT,
+        status: mssf_core::HRESULT,
         // already got from front end
         store: *mut ::core::ffi::c_void,
-        exist: ::windows::Win32::Foundation::BOOL,
+        exist: BOOL,
     ) {
         let ctx_back =
             unsafe { Box::from_raw(ctx as *mut Sender<Result<(StateProvider, BOOL), Error>>) };
@@ -109,8 +106,8 @@ impl TxnReplicaReplicator {
     pub fn get_or_add_state_provider_async(
         &self,
         txn: &Txn,
-        name: &HSTRING,
-        lang: &HSTRING,
+        name: &WString,
+        lang: &WString,
         stateproviderinfo: &StateProvider_Info,
         timeout: i64,
     ) -> Receiver<Result<(StateProvider, BOOL), Error>>
@@ -119,10 +116,10 @@ impl TxnReplicaReplicator {
         // cancellation
         let mut cts = CancellationToken::default();
         let mut stateprovider = std::ptr::null_mut::<c_void>();
-        let mut alreadyexists = BOOL::default();
+        let mut alreadyexists = BOOL(0);
         let callback: fnNotifyGetOrAddStateProviderAsyncCompletion =
             Some(Self::get_or_add_state_provider_callback);
-        let mut synchronouscomplete = BOOL::default();
+        let mut synchronouscomplete = BOOL(0);
 
         let (tx, rx) = oneshot::channel();
 
@@ -154,7 +151,7 @@ impl TxnReplicaReplicator {
                 Box::from_raw(ctx_raw as *mut Sender<Result<(StateProvider, BOOL), Error>>)
             };
             ctx_back.send(Err(ok.unwrap_err())).unwrap();
-        } else if synchronouscomplete.as_bool() {
+        } else if synchronouscomplete.0 != 0 {
             let store = StateProvider { h: stateprovider };
             // ctx is not used by backend
             let ctx_back = unsafe {
@@ -172,9 +169,9 @@ pub fn get_txn_replicator(
     partition: &IFabricStatefulServicePartition,
     dataloss_handler: &IFabricDataLossHandler,
     replicator_settings: &TxnReplicator_Settings,
-    config_package_name: &HSTRING,
-    replicator_settings_section_name: &HSTRING,
-    replicator_security_section_name: &HSTRING,
+    config_package_name: &WString,
+    replicator_settings_section_name: &WString,
+    replicator_security_section_name: &WString,
 ) -> Result<(IFabricPrimaryReplicator, TxnReplicaReplicator), Error> {
     let mut replicator_raw: *mut std::ffi::c_void = std::ptr::null_mut();
     let mut txn_replicator_raw: *mut std::ffi::c_void = std::ptr::null_mut();
@@ -299,7 +296,7 @@ impl StateProvider {
     unsafe extern "system" fn conditional_get_async_callback(
         ctx: *mut ::core::ffi::c_void,
         status: HRESULT,
-        found: ::windows::Win32::Foundation::BOOL,
+        found: BOOL,
         _objecthandle: usize,
         bytes: *mut ::core::ffi::c_void,
         byteslength: u32,
@@ -317,7 +314,7 @@ impl StateProvider {
         }
 
         let mut val = Vec::<u8>::default();
-        if found.as_bool() {
+        if found.0 != 0 {
             let val_view = unsafe { slice::from_raw_parts(bytes as *mut u8, byteslength as usize) };
             val = val_view.into();
         }
@@ -332,7 +329,7 @@ impl StateProvider {
     pub fn conditional_get_async(
         &self,
         txn: &Txn,
-        key: &HSTRING,
+        key: &WString,
         timeout: i64,
         lockmode: Store_LockMode,
         // found, value, version sequence number
@@ -341,9 +338,9 @@ impl StateProvider {
         let mut buff = TempBuffer::default();
         let mut version_sequence_number = i64::default();
         let mut cts = CancellationToken::default();
-        let mut found = BOOL::default();
+        let mut found = BOOL(0);
         let callback: fnNotifyGetAsyncCompletion = Some(Self::conditional_get_async_callback);
-        let mut synchronouscomplete = BOOL::default();
+        let mut synchronouscomplete = BOOL(0);
 
         let (tx, rx) = oneshot::channel();
 
@@ -372,12 +369,12 @@ impl StateProvider {
 
         match ok {
             Ok(_) => {
-                if synchronouscomplete.as_bool() {
+                if synchronouscomplete.0 != 0 {
                     let ctx_back = unsafe {
                         Box::from_raw(ctx_raw as *mut Sender<Result<(BOOL, Vec<u8>, i64), Error>>)
                     };
                     let mut val = Vec::<u8>::default();
-                    if found.as_bool() {
+                    if found.0 != 0 {
                         val = buff.to_vec();
                     }
                     ctx_back
@@ -411,14 +408,14 @@ impl StateProvider {
     pub fn add_async(
         &self,
         txn: &Txn,
-        key: &HSTRING,
+        key: &WString,
         val: &[u8],
         timeout: i64,
     ) -> Receiver<Result<(), Error>> {
         let object_handle = usize::default();
         let mut cts = CancellationToken::default();
         let callback: fnNotifyAsyncCompletion = Some(Self::add_async_callback);
-        let mut synchronouscomplete = BOOL::default();
+        let mut synchronouscomplete = BOOL(0);
 
         let (tx, rx) = oneshot::channel();
 
@@ -431,7 +428,7 @@ impl StateProvider {
             Store_AddAsync(
                 self.h,
                 txn.h,
-                key,
+                key.as_pcwstr(),
                 object_handle,
                 val.as_ptr() as *const c_void,
                 val.len() as u32,
@@ -445,7 +442,7 @@ impl StateProvider {
 
         match ok {
             Ok(_) => {
-                if synchronouscomplete.as_bool() {
+                if synchronouscomplete.0 != 0 {
                     let ctx_back =
                         unsafe { Box::from_raw(ctx_raw as *mut Sender<Result<(), Error>>) };
                     ctx_back.send(Ok(())).unwrap();
@@ -462,7 +459,7 @@ impl StateProvider {
     unsafe extern "system" fn conditional_remove_async_callback(
         ctx: *mut ::core::ffi::c_void,
         status: HRESULT,
-        removed: ::windows::Win32::Foundation::BOOL,
+        removed: BOOL,
     ) {
         let ctx_back = unsafe { Box::from_raw(ctx as *mut Sender<Result<BOOL, Error>>) };
         let ok = if status.is_ok() {
@@ -476,14 +473,14 @@ impl StateProvider {
     pub fn conditional_remove_async(
         &self,
         txn: &Txn,
-        key: &HSTRING,
+        key: &WString,
 
         timeout: i64,
         conditionalversion: i64,
     ) -> Receiver<Result<BOOL, Error>> {
         let mut cts = CancellationToken::default();
-        let mut removed = BOOL::default();
-        let mut synchronouscomplete = BOOL::default();
+        let mut removed = BOOL(0);
+        let mut synchronouscomplete = BOOL(0);
 
         let callback: fnNotifyRemoveAsyncCompletion = Some(Self::conditional_remove_async_callback);
         let (tx, rx) = oneshot::channel();
@@ -497,7 +494,7 @@ impl StateProvider {
             Store_ConditionalRemoveAsync(
                 self.h,
                 txn.h,
-                key,
+                key.as_pcwstr(),
                 timeout,
                 cts.init_void_addr(),
                 conditionalversion,
@@ -510,7 +507,7 @@ impl StateProvider {
 
         match ok {
             Ok(_) => {
-                if synchronouscomplete.as_bool() {
+                if synchronouscomplete.0 != 0 {
                     let ctx_back =
                         unsafe { Box::from_raw(ctx_raw as *mut Sender<Result<BOOL, Error>>) };
                     ctx_back.send(Ok(removed)).unwrap();
@@ -549,7 +546,7 @@ impl StateProvider {
         txn: &Txn,
     ) -> Receiver<Result<KeyValueEnumerator, Error>> {
         let mut enu = KeyValueEnumerator::default();
-        let mut synchronouscomplete = BOOL::default();
+        let mut synchronouscomplete = BOOL(0);
 
         let callback: fnNotifyCreateEnumeratorAsyncCompletion =
             Some(Self::create_enumerator_async_callback);
@@ -573,7 +570,7 @@ impl StateProvider {
 
         match ok {
             Ok(_) => {
-                if synchronouscomplete.as_bool() {
+                if synchronouscomplete.0 != 0 {
                     let ctx_back = unsafe {
                         Box::from_raw(ctx_raw as *mut Sender<Result<KeyValueEnumerator, Error>>)
                     };
@@ -651,7 +648,7 @@ impl Txn {
         let ok = unsafe { Transaction_CommitAsync(self.h, callback, ctx_raw as *const c_void) };
         match ok {
             Ok(synccomplete) => {
-                if synccomplete.as_bool() {
+                if synccomplete.0 != 0 {
                     // no callback will be invoked
                     let ctx_back =
                         unsafe { Box::from_raw(ctx_raw as *mut Sender<Result<(), Error>>) };
@@ -699,7 +696,7 @@ impl KeyValueEnumerator {
     unsafe extern "system" fn move_next_async_callback(
         ctx: *mut ::core::ffi::c_void,
         status: HRESULT,
-        advanced: ::windows::Win32::Foundation::BOOL,
+        advanced: BOOL,
         key: PCWSTR,
         _objecthandle: usize,
         bytebuffer: *mut ::core::ffi::c_void,
@@ -707,7 +704,7 @@ impl KeyValueEnumerator {
         versionsequencenumber: i64,
     ) {
         let ctx_back = unsafe {
-            Box::from_raw(ctx as *mut Sender<Result<(BOOL, HSTRING, Vec<u8>, i64), Error>>)
+            Box::from_raw(ctx as *mut Sender<Result<(BOOL, WString, Vec<u8>, i64), Error>>)
         };
 
         let ok = if status.is_err() {
@@ -715,7 +712,7 @@ impl KeyValueEnumerator {
         } else {
             ctx_back.send(Ok((
                 advanced,
-                HSTRING::from_wide(unsafe { key.as_wide() }).unwrap(),
+                WString::from_wide(unsafe { key.as_wide() }),
                 TempBuffer::raw_to_vec(bytebuffer as *const u8, bufferlength as usize),
                 versionsequencenumber,
             )))
@@ -727,9 +724,9 @@ impl KeyValueEnumerator {
 
     // advanced, key, val, vsn
     #[allow(clippy::type_complexity)]
-    pub fn move_next_async(&self) -> Receiver<Result<(BOOL, HSTRING, Vec<u8>, i64), Error>> {
+    pub fn move_next_async(&self) -> Receiver<Result<(BOOL, WString, Vec<u8>, i64), Error>> {
         let mut cts = CancellationToken::default();
-        let mut advanced = BOOL::default();
+        let mut advanced = BOOL(0);
         let mut key = PCWSTR::null();
         let mut objecthandle = usize::default();
         let mut buff = TempBuffer::default();
@@ -739,9 +736,9 @@ impl KeyValueEnumerator {
 
         let (tx, rx) = oneshot::channel();
         let ctx = Box::new(tx);
-        let ctx_raw = &*ctx as *const Sender<Result<(BOOL, HSTRING, Vec<u8>, i64), Error>>;
+        let ctx_raw = &*ctx as *const Sender<Result<(BOOL, WString, Vec<u8>, i64), Error>>;
         std::mem::forget(ctx); // forget in front end.
-        let mut synchronouscomplete = BOOL::default();
+        let mut synchronouscomplete = BOOL(0);
 
         let ok = unsafe {
             StoreKeyValueEnumerator_MoveNextAsync(
@@ -760,20 +757,17 @@ impl KeyValueEnumerator {
 
         match ok {
             Ok(()) => {
-                if synchronouscomplete.as_bool() {
+                if synchronouscomplete.0 != 0 {
                     // no callback will be invoked
                     let ctx_back = unsafe {
                         Box::from_raw(
-                            ctx_raw as *mut Sender<Result<(BOOL, HSTRING, Vec<u8>, i64), Error>>,
+                            ctx_raw as *mut Sender<Result<(BOOL, WString, Vec<u8>, i64), Error>>,
                         )
                     };
-                    let (k, v) = if advanced.as_bool() {
-                        (
-                            HSTRING::from_wide(unsafe { key.as_wide() }).unwrap(),
-                            buff.to_vec(),
-                        )
+                    let (k, v) = if advanced.0 != 0 {
+                        (WString::from_wide(unsafe { key.as_wide() }), buff.to_vec())
                     } else {
-                        (HSTRING::default(), Vec::<u8>::new())
+                        (WString::default(), Vec::<u8>::new())
                     };
                     ctx_back
                         .send(Ok((advanced, k, v, versionsequencenumber)))
@@ -784,7 +778,7 @@ impl KeyValueEnumerator {
                 // no callback will be invoked
                 let ctx_back = unsafe {
                     Box::from_raw(
-                        ctx_raw as *mut Sender<Result<(BOOL, HSTRING, Vec<u8>, i64), Error>>,
+                        ctx_raw as *mut Sender<Result<(BOOL, WString, Vec<u8>, i64), Error>>,
                     )
                 };
                 ctx_back.send(Err(e)).unwrap();

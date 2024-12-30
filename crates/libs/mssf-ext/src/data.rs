@@ -180,9 +180,9 @@ impl<T: Buf> OperationDataBridge<T> {
     }
 }
 
-impl<T: Buf> IFabricOperationData_Impl for OperationDataBridge<T> {
+impl<T: Buf> IFabricOperationData_Impl for OperationDataBridge_Impl<T> {
     #[allow(clippy::not_unsafe_ptr_arg_deref)]
-    fn GetData(&self, count: *mut u32) -> windows_core::Result<*mut FABRIC_OPERATION_DATA_BUFFER> {
+    fn GetData(&self, count: *mut u32) -> mssf_core::Result<*mut FABRIC_OPERATION_DATA_BUFFER> {
         assert!(!count.is_null());
         let ptr = self.cache.as_ptr();
         unsafe { *count = self.cache.len() as u32 };

@@ -8,11 +8,9 @@ members = [
 
 [workspace.dependencies]
 mssf-ext = {path = "./crates/libs/mssf-ext"}
-mssf-com = {version = "0.0.16"}
-mssf-core = "0.0.16"
-windows = {version = "0.57", features = [ "Win32_Foundation" ]}
-windows-core = "0.57"
-windows-bindgen = "0.57"
+mssf-com = {version = "0.0.17"}
+mssf-core = "0.0.17"
+windows-bindgen = "0.58"
 tracing = { version = "0.1", features = ["log"] }
 tracing-subscriber = { version = "0.3",  default-features = false, features = ["fmt"]}
 trait-variant = "0.1"
@@ -27,6 +25,12 @@ prost = "0.13"
 tonic-build = "0.12"
 prost-build = "0.13"
 clap = { version = "4", features = ["derive"] }
+
+# treat pal as the windows core.
+# see mssf-pal documentation why it is used this way.
+[workspace.dependencies.windows-core]
+package = "mssf-pal"
+version = "0.0.17"
 
 # testing code not released in crates yet
 # [patch.crates-io]

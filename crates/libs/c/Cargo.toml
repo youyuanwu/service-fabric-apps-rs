@@ -5,11 +5,10 @@ edition = "2018"
 publish = false
 
 [dependencies]
-windows-core = "0.57"
+# windows-core.workspace = true
 mssf-com.workspace = true
 
-[dependencies.windows]
-version = "0.57"
-features = [
-    "Win32_Foundation",
-]
+# hack to use mssf-pal and expose it internally
+[dependencies.extern-windows-core]
+package = "mssf-pal"
+version = "0.0.17"

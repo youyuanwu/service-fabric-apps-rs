@@ -12,7 +12,7 @@ use mssf_core::{
         stateful_proxy::{PrimaryReplicatorProxy, StatefulServicePartition},
     },
     types::{Epoch, OpenMode, ReplicaRole},
-    GUID, HSTRING,
+    Interface, WString, GUID,
 };
 use mssf_ext::{
     data::OperationDataBuf,
@@ -28,7 +28,6 @@ use tokio::{select, sync::Mutex};
 use tokio_util::sync::CancellationToken;
 use tonic::transport::Server;
 use tracing::{error, info};
-use windows_core::Interface;
 
 use crate::{
     app::KvApp, data::VecOperationDataStream, rpc::kvmap_service_server::KvmapServiceServer,
@@ -48,8 +47,8 @@ impl Factory {
 impl StatefulServiceFactory for Factory {
     fn create_replica(
         &self,
-        servicetypename: &mssf_core::HSTRING,
-        servicename: &mssf_core::HSTRING,
+        servicetypename: &mssf_core::WString,
+        servicename: &mssf_core::WString,
         initializationdata: &[u8],
         partitionid: &GUID,
         replicaid: i64,
@@ -230,7 +229,7 @@ impl StatefulServiceReplica for Replica {
         let mut rplctr;
         let state_rplctr;
         {
-            let addr = HSTRING::from(format!("{}:{}", "localhost", self.ctx.replication_port));
+            let addr = WString::from(format!("{}:{}", "localhost", self.ctx.replication_port));
             let settings = FABRIC_REPLICATOR_SETTINGS {
                 Flags: FABRIC_REPLICATOR_ADDRESS.0 as u32,
                 ReplicatorAddress: mssf_core::PCWSTR(addr.as_ptr()),
@@ -304,7 +303,7 @@ impl StatefulServiceReplica for Replica {
         &self,
         newrole: ReplicaRole,
         _: CancellationToken,
-    ) -> mssf_core::Result<HSTRING> {
+    ) -> mssf_core::Result<WString> {
         // get the state replicator opened.
         let sr = self
             .state_replicator
@@ -316,7 +315,7 @@ impl StatefulServiceReplica for Replica {
         let rpc_port = self.ctx.rpc_port;
         let svc_addr = format!("[::1]:{}", rpc_port);
         // include scheme in the svc addr returned to SF.
-        let addr_res = HSTRING::from(format!("http://{}", svc_addr));
+        let addr_res = WString::from(format!("http://{}", svc_addr));
         // clean up pending stuff
         let curr_role = self.role.lock().await.get_mut().clone();
         if curr_role == newrole {

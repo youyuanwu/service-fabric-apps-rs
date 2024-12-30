@@ -6,11 +6,11 @@ use mssf_com::FabricTypes::{
     FABRIC_OPERATION_TYPE_ROLLBACK_ATOMIC_GROUP, FABRIC_SERVICE_KIND, FABRIC_SERVICE_KIND_STATEFUL,
     FABRIC_SERVICE_KIND_STATELESS, FABRIC_SERVICE_QUERY_DESCRIPTION, FABRIC_URI,
 };
-use mssf_core::HSTRING;
+use mssf_core::WString;
 
 pub struct ServiceQueryDescription {
-    pub application_name: HSTRING,           // in url format
-    pub servicename_filter: Option<HSTRING>, // in url format
+    pub application_name: WString,           // in url format
+    pub servicename_filter: Option<WString>, // in url format
 }
 
 impl ServiceQueryDescription {

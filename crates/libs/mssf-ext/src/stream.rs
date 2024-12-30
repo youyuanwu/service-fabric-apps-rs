@@ -40,12 +40,12 @@ impl<T: OperationDataStream, E: Executor> OpeartionDataStreamBridge<T, E> {
 }
 
 impl<T: OperationDataStream, E: Executor> IFabricOperationDataStream_Impl
-    for OpeartionDataStreamBridge<T, E>
+    for OpeartionDataStreamBridge_Impl<T, E>
 {
     fn BeginGetNext(
         &self,
         callback: Option<&IFabricAsyncOperationCallback>,
-    ) -> windows_core::Result<IFabricAsyncOperationContext> {
+    ) -> mssf_core::Result<IFabricAsyncOperationContext> {
         let inner = self.inner.clone();
         let (ctx, token) = BridgeContext3::make(callback);
         ctx.spawn(&self.rt, async move {
@@ -62,7 +62,7 @@ impl<T: OperationDataStream, E: Executor> IFabricOperationDataStream_Impl
     fn EndGetNext(
         &self,
         context: Option<&IFabricAsyncOperationContext>,
-    ) -> windows_core::Result<IFabricOperationData> {
+    ) -> mssf_core::Result<IFabricOperationData> {
         BridgeContext3::result(context)?
     }
 }
