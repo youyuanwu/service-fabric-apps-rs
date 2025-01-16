@@ -8,9 +8,10 @@ members = [
 
 [workspace.dependencies]
 mssf-ext = {path = "./crates/libs/mssf-ext"}
-mssf-com = {version = "0.0.17"}
-mssf-core = "0.0.17"
-windows-bindgen = "0.58"
+mssf-com = {version = "0.0.18" }
+mssf-core = "0.0.18"
+windows-bindgen = "0.59"
+windows-targets = "0.53" # TODO: BOOL problem is fixed here: https://github.com/microsoft/windows-rs/pull/3441 need to wait next release.
 tracing = { version = "0.1", features = ["log"] }
 tracing-subscriber = { version = "0.3",  default-features = false, features = ["fmt"]}
 trait-variant = "0.1"

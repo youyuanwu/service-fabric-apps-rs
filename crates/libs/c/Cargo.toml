@@ -7,8 +7,9 @@ publish = false
 [dependencies]
 # windows-core.workspace = true
 mssf-com.workspace = true
+windows-targets.workspace = true
 
 # hack to use mssf-pal and expose it internally
 [dependencies.extern-windows-core]
 package = "mssf-pal"
-version = "0.0.17"
+version = "0.0.18"
