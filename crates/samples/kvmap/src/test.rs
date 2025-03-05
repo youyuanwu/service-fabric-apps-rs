@@ -8,7 +8,7 @@ use mssf_core::{
         },
         FabricClient,
     },
-    error::FabricErrorCode,
+    ErrorCode,
     types::{
         QueryServiceReplicaStatus, ReplicaRole, RestartReplicaDescription,
         ServiceNotificationFilterDescription, ServiceNotificationFilterFlags,
@@ -44,8 +44,8 @@ pub struct KvMapMgmt {
 impl KvMapMgmt {
     pub fn new(c: &FabricClient) -> Self {
         Self {
-            svc: c.get_service_manager(),
-            query: c.get_query_manager(),
+            svc: c.get_service_manager().clone(),
+            query: c.get_query_manager().clone(),
         }
     }
 
@@ -94,7 +94,7 @@ impl KvMapMgmt {
             .find(|e| e.role == ServiceEndpointRole::StatefulSecondary);
         #[allow(clippy::unnecessary_unwrap)]
         if primary_addr.is_none() || secondary_addr.is_none() {
-            Err(FabricErrorCode::E_FAIL.into())
+            Err(ErrorCode::E_FAIL.into())
         } else {
             Ok((
                 primary_addr.unwrap().address.to_string(),
@@ -175,20 +175,20 @@ impl KvMapMgmt {
             .collect::<Vec<_>>();
         if replicas.len() < 2 {
             // not yet ready
-            return Err(FabricErrorCode::E_FAIL.into());
+            return Err(ErrorCode::E_FAIL.into());
         }
 
         let primary = replicas
             .iter()
             .find(|r| r.replica_role == ReplicaRole::Primary);
         if primary.is_none() {
-            return Err(FabricErrorCode::E_FAIL.into());
+            return Err(ErrorCode::E_FAIL.into());
         }
         let secondary = replicas
             .iter()
             .find(|r| r.replica_role != ReplicaRole::Primary);
         if secondary.is_none() {
-            return Err(FabricErrorCode::E_FAIL.into());
+            return Err(ErrorCode::E_FAIL.into());
         }
         Ok((primary.unwrap().clone(), secondary.unwrap().clone()))
     }

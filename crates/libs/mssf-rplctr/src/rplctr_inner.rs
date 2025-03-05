@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use bytes::Bytes;
 use mssf_core::{
-    error::FabricErrorCode,
+    ErrorCode,
     runtime::executor::DefaultExecutor,
     sync::CancellationToken,
     types::{Epoch, ReplicaRole, ReplicatorSettings},
@@ -55,7 +55,7 @@ impl<T: StateProvider> RplctrInner<T> {
         self.sec_rplct_stream_tx
             .send((sn, data))
             .await
-            .map_err(|_| FabricErrorCode::E_FAIL.into())
+            .map_err(|_| ErrorCode::E_FAIL.into())
     }
 
     // open rpc server and block current task.

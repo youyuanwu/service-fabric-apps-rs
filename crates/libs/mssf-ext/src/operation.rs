@@ -29,7 +29,7 @@ impl Operation for OperationProxy {
     }
 
     fn acknowledge(&self) -> mssf_core::Result<()> {
-        unsafe { self.com_impl.Acknowledge() }
+        unsafe { self.com_impl.Acknowledge() }.map_err(mssf_core::Error::from)
     }
 }
 

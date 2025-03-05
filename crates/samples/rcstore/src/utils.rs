@@ -17,8 +17,9 @@ pub struct DataLossHandler {}
 impl IFabricDataLossHandler_Impl for DataLossHandler_Impl {
     fn BeginOnDataLoss(
         &self,
-        callback: Option<&IFabricAsyncOperationCallback>,
-    ) -> mssf_core::Result<IFabricAsyncOperationContext> {
+        callback: windows_core::Ref<IFabricAsyncOperationCallback>,
+    ) -> mssf_core::WinResult<IFabricAsyncOperationContext> {
+        // TODO: async context needs to be fixed
         let ctx: IFabricAsyncOperationContext = AsyncContext::new(callback).into();
         // TODO: maybe ctx return needs to set first
         unsafe { ctx.Callback().expect("cannot get callback").Invoke(&ctx) };
@@ -27,9 +28,9 @@ impl IFabricDataLossHandler_Impl for DataLossHandler_Impl {
 
     fn EndOnDataLoss(
         &self,
-        _context: Option<&IFabricAsyncOperationContext>,
+        _context: windows_core::Ref<IFabricAsyncOperationContext>,
         isstatechanged: *mut u8,
-    ) -> mssf_core::Result<()> {
+    ) -> mssf_core::WinResult<()> {
         unsafe { *isstatechanged = 0 };
         Ok(())
     }

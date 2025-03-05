@@ -44,8 +44,8 @@ impl<T: OperationDataStream, E: Executor> IFabricOperationDataStream_Impl
 {
     fn BeginGetNext(
         &self,
-        callback: Option<&IFabricAsyncOperationCallback>,
-    ) -> mssf_core::Result<IFabricAsyncOperationContext> {
+        callback: windows_core::Ref<IFabricAsyncOperationCallback>,
+    ) -> mssf_core::WinResult<IFabricAsyncOperationContext> {
         let inner = self.inner.clone();
         let (ctx, token) = BridgeContext3::make(callback);
         ctx.spawn(&self.rt, async move {
@@ -55,14 +55,14 @@ impl<T: OperationDataStream, E: Executor> IFabricOperationDataStream_Impl
                     || unsafe { IFabricOperationData::from_raw(std::ptr::null_mut()) },
                     |x| IFabricOperationData::from(OperationDataBridge::new(x)),
                 )
-            })
+            }) .map_err(mssf_core::WinError::from)
         })
     }
 
     fn EndGetNext(
         &self,
-        context: Option<&IFabricAsyncOperationContext>,
-    ) -> mssf_core::Result<IFabricOperationData> {
+        context: windows_core::Ref<IFabricAsyncOperationContext>,
+    ) -> mssf_core::WinResult<IFabricOperationData> {
         BridgeContext3::result(context)?
     }
 }
@@ -97,12 +97,12 @@ impl OperationDataStream for OperationDataStreamProxy {
                 Ok(Some(proxy))
             }
             Err(e) => {
-                if e == mssf_core::Error::empty() {
+                if e == mssf_core::WinError::empty() {
                     // special case of end of stream.
                     // nullptr is returned and windows-rs gives an empty error.
                     Ok(None)
                 } else {
-                    Err(e)
+                    Err(e.into())
                 }
             }
         }
@@ -138,12 +138,12 @@ impl OperationStream for OperationStreamProxy {
                 Ok(Some(proxy))
             }
             Err(e) => {
-                if e == mssf_core::Error::empty() {
+                if e == mssf_core::WinError::empty() {
                     // special case of end of stream.
                     // nullptr is returned and windows-rs gives an empty error.
                     Ok(None)
                 } else {
-                    Err(e)
+                    Err(e.into())
                 }
             }
         }

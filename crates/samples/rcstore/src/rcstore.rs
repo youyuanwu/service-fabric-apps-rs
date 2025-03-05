@@ -16,10 +16,7 @@ use mssf_core::{
         executor::{DefaultExecutor, Executor},
         stateful::{PrimaryReplicator, StatefulServiceFactory, StatefulServiceReplica},
         stateful_proxy::{PrimaryReplicatorProxy, StatefulServicePartition},
-    },
-    sync::CancellationToken,
-    types::{OpenMode, ReplicaRole},
-    GUID,
+    }, sync::CancellationToken, types::{OpenMode, ReplicaRole}, Interface, GUID
 };
 use mssf_core::{Error, WString};
 use sfrc_c::ReliableCollectionRuntime::{IFabricDataLossHandler, TxnReplicator_Settings};
@@ -27,7 +24,7 @@ use sfrc_core::wrap::{get_txn_replicator, TxnReplicaReplicator};
 use tokio::sync::oneshot::{self, Sender};
 use tonic::transport::Server;
 
-use crate::utils::DataLossHandler;
+// use crate::utils::DataLossHandler;
 
 pub struct Factory {
     replication_port: u32,
@@ -165,7 +162,8 @@ impl StatefulServiceReplica for Replica {
         // should be primary replicator
         info!("Replica::open {:?}", openmode);
 
-        let dataloss_handler: IFabricDataLossHandler = DataLossHandler {}.into();
+        // TODO: this is to unblock code change. The nullptr approach might not work.
+        let dataloss_handler: IFabricDataLossHandler = unsafe { IFabricDataLossHandler::from_raw(std::ptr::null_mut()) };
 
         let addr = get_addr(self.rplc_port, WString::from("localhost"));
         let waddr = WString::from(addr);
@@ -184,6 +182,8 @@ impl StatefulServiceReplica for Replica {
             &WString::new(),
             &WString::new(),
         );
+        // Do not clean up nullptr
+        std::mem::forget(dataloss_handler);
         if ok.is_err() {
             let e = ok.err().unwrap();
             info!("get_txn_replicator failed with {}", e);
@@ -225,7 +225,7 @@ impl StatefulServiceReplica for Replica {
 pub mod rpc {
     use std::sync::Arc;
 
-    use mssf_core::error::FabricErrorCode::E_NOT_FOUND;
+    use mssf_core::ErrorCode::E_NOT_FOUND;
     use mssf_core::{Error, WString, PCWSTR};
     use sfrc_c::ReliableCollectionRuntime::{
         StateProvider_Info, StateProvider_Info_V1_Size, StateProvider_Kind_Store,

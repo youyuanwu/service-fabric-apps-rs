@@ -1,21 +1,16 @@
 use std::time::Duration;
 
-use mssf_com::FabricTypes::FABRIC_E_TIMEOUT;
 use mssf_core::{
-    error::FabricErrorCode,
+    ErrorCode,
     runtime::executor::DefaultExecutor,
     sync::{BridgeContext3, CancellationToken},
 };
 use windows_core::{implement, Interface};
-use FabricStrings::{
-    IFabricStringsApiTable, IFabricStringsApiTable_Impl, IFabricStringsBytes,
-    IFabricStringsBytes_Impl,
-};
+
 
 #[allow(non_snake_case)]
-mod FabricCommon;
-#[allow(non_snake_case)]
 pub mod FabricStrings;
+pub use FabricStrings::Microsoft::ServiceFabric::FabricStrings::*;
 
 lazy_static::lazy_static! {
     static ref RT: tokio::runtime::Runtime = tokio::runtime::Builder::new_multi_thread().worker_threads(1).enable_time().build().unwrap();
@@ -110,10 +105,10 @@ impl ApiTable {
         let sleep = std::cmp::min(default_duration, timeout);
 
         tokio::select! {
-            _ = cancellation_token.cancelled() => { Err(FabricErrorCode::E_ABORT.into()) }
+            _ = cancellation_token.cancelled() => { Err(ErrorCode::E_ABORT.into()) }
             _ = tokio::time::sleep(sleep) => {
                 if timeout < default_duration{
-                    Err(mssf_core::error::FabricError::from(FABRIC_E_TIMEOUT).into())
+                    Err(ErrorCode::FABRIC_E_TIMEOUT.into())
                 }else{
                     let s1 = StringProxy::new(str1);
                     let s2 = StringProxy::new(str2);
@@ -144,11 +139,11 @@ impl ApiTableBridge {
 impl IFabricStringsApiTable_Impl for ApiTableBridge_Impl {
     fn BeginConcatStrings(
         &self,
-        str1: Option<&FabricStrings::IFabricStringsBytes>,
-        str2: Option<&FabricStrings::IFabricStringsBytes>,
+        str1: windows_core::Ref<IFabricStringsBytes>,
+        str2: windows_core::Ref<IFabricStringsBytes>,
         timeoutmilliseconds: u32,
-        callback: Option<&crate::FabricCommon::IFabricAsyncOperationCallback>,
-    ) -> windows_core::Result<crate::FabricCommon::IFabricAsyncOperationContext> {
+        callback: windows_core::Ref<mssf_com::FabricCommon::IFabricAsyncOperationCallback>,
+    ) -> windows_core::Result<mssf_com::FabricCommon::IFabricAsyncOperationContext> {
         let s1 = str1.unwrap().clone();
         let s2 = str2.unwrap().clone();
         let inner = self.inner.clone();
@@ -161,14 +156,14 @@ impl IFabricStringsApiTable_Impl for ApiTableBridge_Impl {
                     Duration::from_millis(timeoutmilliseconds as u64),
                     token,
                 )
-                .await
+                .await.map_err(windows_core::Error::from)
         })
     }
 
     fn EndConcatStrings(
         &self,
-        context: Option<&crate::FabricCommon::IFabricAsyncOperationContext>,
-    ) -> windows_core::Result<FabricStrings::IFabricStringsBytes> {
+        context: windows_core::Ref<mssf_com::FabricCommon::IFabricAsyncOperationContext>,
+    ) -> windows_core::Result<IFabricStringsBytes> {
         BridgeContext3::result(context)?
     }
 }

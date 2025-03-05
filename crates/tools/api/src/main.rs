@@ -28,6 +28,8 @@ fn main()  {
         "--no-allow",
         "--reference",
         "windows,skip-root,Windows",
+        "--reference",
+        "mssf_com,full,Microsoft",
     ]);
     let mut lines = read_file_as_lines(out_file);
     remove_namespace(&mut lines, "pub mod Microsoft");

@@ -27,7 +27,7 @@ impl<T: StateProvider> StateReplicator for StRplctr<T> {
         &self,
         _operation_data: impl OperationData,
         _: CancellationToken,
-    ) -> (i64, FabricReceiver2<mssf_core::Result<i64>>) {
+    ) -> (i64, FabricReceiver2<mssf_core::WinResult<i64>>) {
         todo!()
     }
 
