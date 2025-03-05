@@ -49,13 +49,17 @@ impl<T: OperationDataStream, E: Executor> IFabricOperationDataStream_Impl
         let inner = self.inner.clone();
         let (ctx, token) = BridgeContext3::make(callback);
         ctx.spawn(&self.rt, async move {
-            inner.get_next(token).await.map(|opt| {
-                opt.map_or_else(
-                    // convert end of stream of none. lazy eval.
-                    || unsafe { IFabricOperationData::from_raw(std::ptr::null_mut()) },
-                    |x| IFabricOperationData::from(OperationDataBridge::new(x)),
-                )
-            }) .map_err(mssf_core::WinError::from)
+            inner
+                .get_next(token)
+                .await
+                .map(|opt| {
+                    opt.map_or_else(
+                        // convert end of stream of none. lazy eval.
+                        || unsafe { IFabricOperationData::from_raw(std::ptr::null_mut()) },
+                        |x| IFabricOperationData::from(OperationDataBridge::new(x)),
+                    )
+                })
+                .map_err(mssf_core::WinError::from)
         })
     }
 

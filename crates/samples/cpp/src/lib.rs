@@ -1,12 +1,11 @@
 use std::time::Duration;
 
 use mssf_core::{
-    ErrorCode,
     runtime::executor::DefaultExecutor,
     sync::{BridgeContext3, CancellationToken},
+    ErrorCode,
 };
 use windows_core::{implement, Interface};
-
 
 #[allow(non_snake_case)]
 pub mod FabricStrings;
@@ -156,7 +155,8 @@ impl IFabricStringsApiTable_Impl for ApiTableBridge_Impl {
                     Duration::from_millis(timeoutmilliseconds as u64),
                     token,
                 )
-                .await.map_err(windows_core::Error::from)
+                .await
+                .map_err(windows_core::Error::from)
         })
     }
 

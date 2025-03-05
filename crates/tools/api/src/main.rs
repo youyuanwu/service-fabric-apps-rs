@@ -11,7 +11,7 @@ use std::{
 
 use windows_bindgen::bindgen;
 
-fn main()  {
+fn main() {
     let sf_winmd = "./build/_deps/fabric_metadata-src/.windows/winmd/Microsoft.ServiceFabric.winmd";
     let out_file = "crates/libs/c/src/ReliableCollectionRuntime.rs";
     bindgen([

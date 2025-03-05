@@ -8,7 +8,6 @@ use mssf_core::{
         },
         FabricClient,
     },
-    ErrorCode,
     types::{
         QueryServiceReplicaStatus, ReplicaRole, RestartReplicaDescription,
         ServiceNotificationFilterDescription, ServiceNotificationFilterFlags,
@@ -16,7 +15,7 @@ use mssf_core::{
         ServicePartitionStatus, ServiceReplicaQueryDescription, ServiceReplicaQueryResult,
         StatefulServiceReplicaQueryResult,
     },
-    WString, GUID,
+    ErrorCode, WString, GUID,
 };
 use tokio::sync::Semaphore;
 

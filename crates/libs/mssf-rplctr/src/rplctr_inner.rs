@@ -2,10 +2,10 @@ use std::sync::Arc;
 
 use bytes::Bytes;
 use mssf_core::{
-    ErrorCode,
     runtime::executor::DefaultExecutor,
     sync::CancellationToken,
     types::{Epoch, ReplicaRole, ReplicatorSettings},
+    ErrorCode,
 };
 use mssf_ext::traits::{Operation, OperationStream, StateProvider};
 use tokio::sync::mpsc;

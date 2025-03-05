@@ -16,7 +16,10 @@ use mssf_core::{
         executor::{DefaultExecutor, Executor},
         stateful::{PrimaryReplicator, StatefulServiceFactory, StatefulServiceReplica},
         stateful_proxy::{PrimaryReplicatorProxy, StatefulServicePartition},
-    }, sync::CancellationToken, types::{OpenMode, ReplicaRole}, Interface, GUID
+    },
+    sync::CancellationToken,
+    types::{OpenMode, ReplicaRole},
+    Interface, GUID,
 };
 use mssf_core::{Error, WString};
 use sfrc_c::ReliableCollectionRuntime::{IFabricDataLossHandler, TxnReplicator_Settings};
@@ -163,7 +166,8 @@ impl StatefulServiceReplica for Replica {
         info!("Replica::open {:?}", openmode);
 
         // TODO: this is to unblock code change. The nullptr approach might not work.
-        let dataloss_handler: IFabricDataLossHandler = unsafe { IFabricDataLossHandler::from_raw(std::ptr::null_mut()) };
+        let dataloss_handler: IFabricDataLossHandler =
+            unsafe { IFabricDataLossHandler::from_raw(std::ptr::null_mut()) };
 
         let addr = get_addr(self.rplc_port, WString::from("localhost"));
         let waddr = WString::from(addr);

@@ -54,7 +54,8 @@ impl<T: StateProvider, E: Executor> IFabricStateProvider_Impl for StateProviderB
         ctx.spawn(&self.rt, async move {
             inner
                 .update_epoch(&epoch2, previousepochlastsequencenumber, token)
-                .await .map_err(mssf_core::WinError::from)
+                .await
+                .map_err(mssf_core::WinError::from)
         })
     }
 
@@ -67,7 +68,9 @@ impl<T: StateProvider, E: Executor> IFabricStateProvider_Impl for StateProviderB
     }
 
     fn GetLastCommittedSequenceNumber(&self) -> mssf_core::WinResult<i64> {
-        self.inner.get_last_committed_sequence_number().map_err(mssf_core::WinError::from)
+        self.inner
+            .get_last_committed_sequence_number()
+            .map_err(mssf_core::WinError::from)
     }
 
     fn BeginOnDataLoss(
@@ -76,7 +79,12 @@ impl<T: StateProvider, E: Executor> IFabricStateProvider_Impl for StateProviderB
     ) -> mssf_core::WinResult<IFabricAsyncOperationContext> {
         let inner = self.inner.clone();
         let (ctx, token) = BridgeContext3::make(callback);
-        ctx.spawn(&self.rt, async move { inner.on_data_loss(token).await.map_err(mssf_core::WinError::from) })
+        ctx.spawn(&self.rt, async move {
+            inner
+                .on_data_loss(token)
+                .await
+                .map_err(mssf_core::WinError::from)
+        })
     }
 
     fn EndOnDataLoss(
