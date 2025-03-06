@@ -19,8 +19,8 @@ use crate::rcstore::Factory;
 
 #[allow(non_camel_case_types, non_snake_case)]
 mod rcstore;
-// #[allow(non_camel_case_types, non_snake_case)]
-// mod utils;
+#[allow(non_camel_case_types, non_snake_case)]
+mod utils;
 
 fn has_debug_arg() -> bool {
     let args: Vec<String> = std::env::args().collect();

@@ -19,8 +19,7 @@ impl IFabricDataLossHandler_Impl for DataLossHandler_Impl {
         &self,
         callback: windows_core::Ref<IFabricAsyncOperationCallback>,
     ) -> mssf_core::WinResult<IFabricAsyncOperationContext> {
-        // TODO: async context needs to be fixed
-        let ctx: IFabricAsyncOperationContext = AsyncContext::new(callback).into();
+        let ctx: IFabricAsyncOperationContext = AsyncContext::new(callback.as_ref()).into();
         // TODO: maybe ctx return needs to set first
         unsafe { ctx.Callback().expect("cannot get callback").Invoke(&ctx) };
         Ok(ctx)

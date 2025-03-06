@@ -19,7 +19,7 @@ use mssf_core::{
     },
     sync::CancellationToken,
     types::{OpenMode, ReplicaRole},
-    Interface, GUID,
+    GUID,
 };
 use mssf_core::{Error, WString};
 use sfrc_c::ReliableCollectionRuntime::{IFabricDataLossHandler, TxnReplicator_Settings};
@@ -27,7 +27,7 @@ use sfrc_core::wrap::{get_txn_replicator, TxnReplicaReplicator};
 use tokio::sync::oneshot::{self, Sender};
 use tonic::transport::Server;
 
-// use crate::utils::DataLossHandler;
+use crate::utils::DataLossHandler;
 
 pub struct Factory {
     replication_port: u32,
@@ -166,8 +166,7 @@ impl StatefulServiceReplica for Replica {
         info!("Replica::open {:?}", openmode);
 
         // TODO: this is to unblock code change. The nullptr approach might not work.
-        let dataloss_handler: IFabricDataLossHandler =
-            unsafe { IFabricDataLossHandler::from_raw(std::ptr::null_mut()) };
+        let dataloss_handler: IFabricDataLossHandler = DataLossHandler {}.into();
 
         let addr = get_addr(self.rplc_port, WString::from("localhost"));
         let waddr = WString::from(addr);
@@ -186,8 +185,6 @@ impl StatefulServiceReplica for Replica {
             &WString::new(),
             &WString::new(),
         );
-        // Do not clean up nullptr
-        std::mem::forget(dataloss_handler);
         if ok.is_err() {
             let e = ok.err().unwrap();
             info!("get_txn_replicator failed with {}", e);
