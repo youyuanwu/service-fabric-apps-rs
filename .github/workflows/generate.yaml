@@ -32,6 +32,11 @@ jobs:
     - name: generate rust code
       run: cmake --build build --config ${{ matrix.BUILD_TYPE }} --target generate_rust
 
+    - name: show winmd generator log
+      if: failure()
+      run: Get-Content .metadata\obj\scratch\x64\Microsoft.ServiceFabric.ReliableCollectionRuntime.generation.output.txt
+      shell: pwsh
+
     - name: check all generated files are checked in git
       run: git diff --exit-code -- '***.rs'
 
