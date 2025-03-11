@@ -42,7 +42,7 @@ endforeach()
 
 add_custom_command(
   OUTPUT ${_out_winmd_paths}
-  COMMAND ${dotnet_exe} build
+  COMMAND ${dotnet_exe} build 
   WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/.metadata
   VERBATIM
 )
