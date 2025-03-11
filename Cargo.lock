@@ -741,16 +741,18 @@ dependencies = [
 
 [[package]]
 name = "mssf-com"
-version = "0.0.20"
-source = "git+https://github.com/youyuanwu/service-fabric-rs-fork.git?rev=f664423fd9f1818cbd400aa34617e73d49fb7ff6#f664423fd9f1818cbd400aa34617e73d49fb7ff6"
+version = "0.0.21"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c42153c06b4c782ac3a830be0389be3739566eae1ac70742161646cbd521e43d"
 dependencies = [
  "mssf-pal",
 ]
 
 [[package]]
 name = "mssf-core"
-version = "0.0.20"
-source = "git+https://github.com/youyuanwu/service-fabric-rs-fork.git?rev=f664423fd9f1818cbd400aa34617e73d49fb7ff6#f664423fd9f1818cbd400aa34617e73d49fb7ff6"
+version = "0.0.21"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7df6391bc71a02c842b0ceb2b6be47402a7505046c34aa2c8b9b14db9db60194"
 dependencies = [
  "bitflags",
  "config",
@@ -781,8 +783,9 @@ dependencies = [
 
 [[package]]
 name = "mssf-pal"
-version = "0.0.20"
-source = "git+https://github.com/youyuanwu/service-fabric-rs-fork.git?rev=f664423fd9f1818cbd400aa34617e73d49fb7ff6#f664423fd9f1818cbd400aa34617e73d49fb7ff6"
+version = "0.0.21"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0f449a2425f6bf5208e248be99afa2fc2eab8be6e297ed8ebb807f622a7d9e47"
 dependencies = [
  "windows-core",
 ]

@@ -1,6 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <Project Sdk="Microsoft.Windows.WinmdGenerator/0.56.13-preview">
     <PropertyGroup Label="Globals">
+        <TargetFramework>net8.0</TargetFramework>
         <OutputWinmd>../.windows/winmd/Microsoft.ServiceFabric.ReliableCollectionRuntime.winmd</OutputWinmd>
         <WinmdVersion>255.255.255.255</WinmdVersion>
         <ExcludeFromCrossarch>true</ExcludeFromCrossarch>
