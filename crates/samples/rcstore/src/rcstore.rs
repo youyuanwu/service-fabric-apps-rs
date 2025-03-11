@@ -165,6 +165,7 @@ impl StatefulServiceReplica for Replica {
         // should be primary replicator
         info!("Replica::open {:?}", openmode);
 
+        // TODO: this is to unblock code change. The nullptr approach might not work.
         let dataloss_handler: IFabricDataLossHandler = DataLossHandler {}.into();
 
         let addr = get_addr(self.rplc_port, WString::from("localhost"));
@@ -225,7 +226,7 @@ impl StatefulServiceReplica for Replica {
 pub mod rpc {
     use std::sync::Arc;
 
-    use mssf_core::error::FabricErrorCode::E_NOT_FOUND;
+    use mssf_core::ErrorCode::E_NOT_FOUND;
     use mssf_core::{Error, WString, PCWSTR};
     use sfrc_c::ReliableCollectionRuntime::{
         StateProvider_Info, StateProvider_Info_V1_Size, StateProvider_Kind_Store,

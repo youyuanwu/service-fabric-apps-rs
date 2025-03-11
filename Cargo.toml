@@ -8,9 +8,11 @@ members = [
 
 [workspace.dependencies]
 mssf-ext = {path = "./crates/libs/mssf-ext"}
-mssf-com = {version = "0.0.17"}
-mssf-core = "0.0.17"
-windows-bindgen = "0.58"
+mssf-com = {version = "0.0.21" }
+mssf-core = "0.0.21"
+windows-bindgen = "0.60"
+windows-link = "0.1"
+windows-targets = "0.53" # TODO: BOOL problem is fixed here: https://github.com/microsoft/windows-rs/pull/3441 need to wait next release.
 tracing = { version = "0.1", features = ["log"] }
 tracing-subscriber = { version = "0.3",  default-features = false, features = ["fmt"]}
 trait-variant = "0.1"
@@ -30,9 +32,10 @@ clap = { version = "4", features = ["derive"] }
 # see mssf-pal documentation why it is used this way.
 [workspace.dependencies.windows-core]
 package = "mssf-pal"
-version = "0.0.17"
+version = "0.0.21"
 
 # testing code not released in crates yet
 # [patch.crates-io]
-# mssf-core = {git = "https://github.com/youyuanwu/service-fabric-rs-fork.git", rev = "5e1956448830333f09ccb2717534219843a2903f"}
-# mssf-com = {git = "https://github.com/youyuanwu/service-fabric-rs-fork.git", rev = "5e1956448830333f09ccb2717534219843a2903f"}
+# mssf-core = {git = "https://github.com/youyuanwu/service-fabric-rs-fork.git", rev = "f664423fd9f1818cbd400aa34617e73d49fb7ff6"}
+# mssf-com = {git = "https://github.com/youyuanwu/service-fabric-rs-fork.git", rev = "f664423fd9f1818cbd400aa34617e73d49fb7ff6"}
+# mssf-pal = {git = "https://github.com/youyuanwu/service-fabric-rs-fork.git", rev = "f664423fd9f1818cbd400aa34617e73d49fb7ff6"}

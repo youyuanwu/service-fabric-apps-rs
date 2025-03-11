@@ -247,7 +247,7 @@ impl StatefulServiceReplica for Replica {
             };
             if res.is_err() {
                 error!("CreateReplicator failed: {:?}", res);
-                return Err(res.err().unwrap());
+                return Err(res.err().unwrap().into());
             }
             state_rplctr = res.unwrap();
         }

@@ -28,7 +28,7 @@ impl StateReplicator for StateReplicatorProxy {
         &self,
         operation_data: impl OperationData,
         cancellation_token: CancellationToken,
-    ) -> (i64, FabricReceiver2<mssf_core::Result<i64>>) {
+    ) -> (i64, FabricReceiver2<mssf_core::WinResult<i64>>) {
         // let the begin op to overwrite the
         let mut sequence_number = 0_i64;
         let ptr = std::ptr::addr_of_mut!(sequence_number);
@@ -54,7 +54,7 @@ impl StateReplicator for StateReplicatorProxy {
     }
     fn update_replicator_settings(&self, settings: &ReplicatorSettings) -> mssf_core::Result<()> {
         let raw = settings.get_raw();
-        unsafe { self.com_impl.UpdateReplicatorSettings(&raw) }
+        unsafe { self.com_impl.UpdateReplicatorSettings(&raw) }.map_err(mssf_core::Error::from)
     }
     fn get_replicator_settings(&self) -> mssf_core::Result<ReplicatorSettings> {
         let raw = unsafe { self.com_impl.GetReplicatorSettings() }?;

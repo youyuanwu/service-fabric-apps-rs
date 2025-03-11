@@ -9,12 +9,14 @@ use std::{
     io::{self, BufRead, Write},
 };
 
-use windows_bindgen::{bindgen, Result};
+use windows_bindgen::bindgen;
 
-fn main() -> Result<()> {
+fn main() {
     let sf_winmd = "./build/_deps/fabric_metadata-src/.windows/winmd/Microsoft.ServiceFabric.winmd";
     let out_file = "crates/libs/c/src/ReliableCollectionRuntime.rs";
-    let log = bindgen([
+    bindgen([
+        "--in",
+        "default",
         "--in",
         "./.windows/winmd/Microsoft.ServiceFabric.ReliableCollectionRuntime.winmd",
         "--in",
@@ -23,15 +25,17 @@ fn main() -> Result<()> {
         out_file,
         "--filter",
         "Microsoft.ServiceFabric.ReliableCollectionRuntime",
-        "--config",
-        "implement",
-    ])?;
-    println!("{}", log);
+        "--no-allow",
+        "--reference",
+        "windows,skip-root,Windows",
+        "--reference",
+        "mssf_com,full,Microsoft",
+    ]);
     let mut lines = read_file_as_lines(out_file);
+    remove_namespace(&mut lines, "pub mod Microsoft");
     remove_namespace(&mut lines, "pub mod ServiceFabric");
     remove_namespace(&mut lines, "pub mod ReliableCollectionRuntime");
     write_content(out_file, lines);
-    Ok(())
 }
 
 fn read_file_as_lines(path: &str) -> Vec<String> {

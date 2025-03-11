@@ -25,7 +25,7 @@ use sfrc_c::ReliableCollectionRuntime::{
     TxnReplicator_Settings, RELIABLECOLLECTION_API_VERSION,
 };
 use tokio::sync::oneshot::{self, Receiver, Sender};
-use windows_core::Win32::Foundation::BOOL;
+use windows_core::BOOL;
 // do module init
 pub struct ReliableCollectionRuntime {}
 
@@ -41,7 +41,7 @@ impl ReliableCollectionRuntime {
         let ok = unsafe {
             ReliableCollectionRuntime_Initialize2(
                 RELIABLECOLLECTION_API_VERSION.try_into().unwrap(),
-                BOOL(1),
+                true,
             )
         };
         ok.expect("cannot init standalone");
@@ -88,7 +88,7 @@ impl TxnReplicaReplicator {
             unsafe { Box::from_raw(ctx as *mut Sender<Result<(StateProvider, BOOL), Error>>) };
 
         let err = Error::from(status);
-        if err.code() != HRESULT::default() {
+        if err.0 != HRESULT::default() {
             // failed
             let ok = ctx_back.send(Err(err));
             debug_assert!(ok.is_ok(), "frontend dropped");
@@ -150,7 +150,7 @@ impl TxnReplicaReplicator {
             let ctx_back = unsafe {
                 Box::from_raw(ctx_raw as *mut Sender<Result<(StateProvider, BOOL), Error>>)
             };
-            ctx_back.send(Err(ok.unwrap_err())).unwrap();
+            ctx_back.send(Err(ok.unwrap_err().into())).unwrap();
         } else if synchronouscomplete.0 != 0 {
             let store = StateProvider { h: stateprovider };
             // ctx is not used by backend
@@ -290,7 +290,7 @@ impl StateProvider {
     }
 
     pub fn get_count(&self) -> Result<i64, Error> {
-        unsafe { Store_GetCount(self.h) }
+        unsafe { Store_GetCount(self.h) }.map_err(Error::from)
     }
 
     unsafe extern "system" fn conditional_get_async_callback(
@@ -386,7 +386,7 @@ impl StateProvider {
                 let ctx_back = unsafe {
                     Box::from_raw(ctx_raw as *mut Sender<Result<(BOOL, Vec<u8>, i64), Error>>)
                 };
-                ctx_back.send(Err(e)).unwrap();
+                ctx_back.send(Err(e.into())).unwrap();
             }
         }
         rx
@@ -450,7 +450,7 @@ impl StateProvider {
             }
             Err(e) => {
                 let ctx_back = unsafe { Box::from_raw(ctx_raw as *mut Sender<Result<(), Error>>) };
-                ctx_back.send(Err(e)).unwrap();
+                ctx_back.send(Err(e.into())).unwrap();
             }
         };
         rx
@@ -516,7 +516,7 @@ impl StateProvider {
             Err(e) => {
                 let ctx_back =
                     unsafe { Box::from_raw(ctx_raw as *mut Sender<Result<BOOL, Error>>) };
-                ctx_back.send(Err(e)).unwrap();
+                ctx_back.send(Err(e.into())).unwrap();
             }
         };
         rx
@@ -581,7 +581,7 @@ impl StateProvider {
                 let ctx_back = unsafe {
                     Box::from_raw(ctx_raw as *mut Sender<Result<KeyValueEnumerator, Error>>)
                 };
-                ctx_back.send(Err(e)).unwrap();
+                ctx_back.send(Err(e.into())).unwrap();
             }
         };
         rx
@@ -619,7 +619,7 @@ impl Txn {
     }
 
     pub fn abort(&self) -> Result<(), Error> {
-        unsafe { Transaction_Abort(self.h) }
+        unsafe { Transaction_Abort(self.h) }.map_err(Error::from)
     }
 
     unsafe extern "system" fn commit_async_callback(
@@ -658,7 +658,7 @@ impl Txn {
             Err(e) => {
                 // no callback will be invoked
                 let ctx_back = unsafe { Box::from_raw(ctx_raw as *mut Sender<Result<(), Error>>) };
-                ctx_back.send(Err(e)).unwrap();
+                ctx_back.send(Err(e.into())).unwrap();
             }
         }
         rx
@@ -781,7 +781,7 @@ impl KeyValueEnumerator {
                         ctx_raw as *mut Sender<Result<(BOOL, WString, Vec<u8>, i64), Error>>,
                     )
                 };
-                ctx_back.send(Err(e)).unwrap();
+                ctx_back.send(Err(e.into())).unwrap();
             }
         }
         rx

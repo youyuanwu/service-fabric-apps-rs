@@ -20,5 +20,6 @@ fn main() {
         // Add link dir for fabric libs on linux.
         let dir = String::from("/opt/microsoft/servicefabric/bin/Fabric/Fabric.Code/");
         println!("cargo:rustc-link-search={}", Path::new(&dir).display());
+        println!("cargo:rustc-link-lib=dylib=ReliableCollectionRuntime")
     }
 }
