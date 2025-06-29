@@ -72,7 +72,7 @@ impl From<FABRIC_OPERATION_TYPE> for OperationType {
             FABRIC_OPERATION_TYPE_INVALID => OperationType::Invalid,
             FABRIC_OPERATION_TYPE_NORMAL => OperationType::Normal,
             FABRIC_OPERATION_TYPE_ROLLBACK_ATOMIC_GROUP => OperationType::RollbackAtomicGroup,
-            _ => panic!("unknown {:?}", value),
+            _ => panic!("unknown {value:?}"),
         }
     }
 }

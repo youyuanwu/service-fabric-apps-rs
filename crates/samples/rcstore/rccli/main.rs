@@ -70,7 +70,7 @@ async fn main() {
     let cli = RcCli::parse();
 
     // resolve port on local onebox
-    let fc = FabricClient::builder().build();
+    let fc = FabricClient::builder().build().unwrap();
     let svcc = fc.get_service_manager();
     let resolution = svcc
         .resolve_service_partition(
@@ -90,7 +90,7 @@ async fn main() {
         .expect("no primary found");
     let addr = endpoint.address.to_string();
 
-    println!("Using rcstore addr: {}", addr);
+    println!("Using rcstore addr: {addr}");
     let mut client = RcstoreServiceClient::connect(addr).await.unwrap();
 
     match cli {

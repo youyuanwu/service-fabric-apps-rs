@@ -8,9 +8,9 @@ members = [
 
 [workspace.dependencies]
 mssf-ext = {path = "./crates/libs/mssf-ext"}
-mssf-com = {version = "0.0.21" }
-mssf-core = "0.0.21"
-windows-bindgen = "0.60"
+mssf-com = {version = "0.1.0" }
+mssf-core = "0.1.0"
+windows-bindgen = "0.62"
 windows-link = "0.1"
 windows-targets = "0.53" # TODO: BOOL problem is fixed here: https://github.com/microsoft/windows-rs/pull/3441 need to wait next release.
 tracing = { version = "0.1", features = ["log"] }
@@ -32,7 +32,7 @@ clap = { version = "4", features = ["derive"] }
 # see mssf-pal documentation why it is used this way.
 [workspace.dependencies.windows-core]
 package = "mssf-pal"
-version = "0.0.21"
+version = "0.1.0"
 
 # testing code not released in crates yet
 # [patch.crates-io]

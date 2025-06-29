@@ -1,6 +1,6 @@
 use bytes::Buf;
 use mssf_core::{
-    sync::{CancellationToken, FabricReceiver2},
+    sync::{CancellationToken, FabricReceiver},
     types::{Epoch, ReplicatorSettings},
 };
 
@@ -94,7 +94,7 @@ pub trait StateReplicator {
         &self,
         operation_data: impl OperationData,
         cancellation_token: CancellationToken,
-    ) -> (i64, FabricReceiver2<mssf_core::WinResult<i64>>);
+    ) -> (i64, FabricReceiver<mssf_core::WinResult<i64>>);
 
     /// Gets replication stream.
     /// Returns:

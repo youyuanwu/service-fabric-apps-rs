@@ -1,6 +1,6 @@
 use mssf_com::FabricRuntime::{IFabricOperationData, IFabricStateReplicator2};
 use mssf_core::{
-    sync::{fabric_begin_end_proxy2, CancellationToken, FabricReceiver2},
+    sync::{fabric_begin_end_proxy, CancellationToken, FabricReceiver},
     types::ReplicatorSettings,
 };
 
@@ -28,14 +28,14 @@ impl StateReplicator for StateReplicatorProxy {
         &self,
         operation_data: impl OperationData,
         cancellation_token: CancellationToken,
-    ) -> (i64, FabricReceiver2<mssf_core::WinResult<i64>>) {
+    ) -> (i64, FabricReceiver<mssf_core::WinResult<i64>>) {
         // let the begin op to overwrite the
         let mut sequence_number = 0_i64;
         let ptr = std::ptr::addr_of_mut!(sequence_number);
         let data_bridge: IFabricOperationData = OperationDataBridge::new(operation_data).into();
         let com1 = &self.com_impl;
         let com2 = self.com_impl.clone();
-        let rx = fabric_begin_end_proxy2(
+        let rx = fabric_begin_end_proxy(
             move |callback| unsafe { com1.BeginReplicate(&data_bridge, callback, ptr) },
             move |ctx| unsafe { com2.EndReplicate(ctx) },
             Some(cancellation_token),

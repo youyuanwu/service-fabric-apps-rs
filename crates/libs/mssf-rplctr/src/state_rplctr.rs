@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use bytes::{Buf, BytesMut};
 use mssf_core::{
-    sync::{CancellationToken, FabricReceiver2},
+    sync::{CancellationToken, FabricReceiver},
     types::ReplicatorSettings,
 };
 use mssf_ext::traits::{Operation, OperationData, OperationStream, StateProvider, StateReplicator};
@@ -27,7 +27,7 @@ impl<T: StateProvider> StateReplicator for StRplctr<T> {
         &self,
         _operation_data: impl OperationData,
         _: CancellationToken,
-    ) -> (i64, FabricReceiver2<mssf_core::WinResult<i64>>) {
+    ) -> (i64, FabricReceiver<mssf_core::WinResult<i64>>) {
         todo!()
     }
 

@@ -30,7 +30,8 @@ fn main() {
         "windows,skip-root,Windows",
         "--reference",
         "mssf_com,full,Microsoft",
-    ]);
+    ])
+    .unwrap();
     let mut lines = read_file_as_lines(out_file);
     remove_namespace(&mut lines, "pub mod Microsoft");
     remove_namespace(&mut lines, "pub mod ServiceFabric");

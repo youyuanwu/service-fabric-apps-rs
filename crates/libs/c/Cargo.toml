@@ -12,4 +12,4 @@ windows-link.workspace = true
 # hack to use mssf-pal and expose it internally
 [dependencies.extern-windows-core]
 package = "mssf-pal"
-version = "0.0.21"
+version = "0.1.0"

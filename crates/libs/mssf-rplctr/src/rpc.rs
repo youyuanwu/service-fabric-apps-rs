@@ -39,7 +39,7 @@ where
         self.inner
             .add_replicate_data(req.sn as i64, Bytes::from(req.data))
             .await
-            .map_err(|e| Status::internal(format!("internal error {}", e)))?;
+            .map_err(|e| Status::internal(format!("internal error {e}")))?;
         Ok(Response::new(RpcOperationResponse { sn, ack: true }))
     }
 }

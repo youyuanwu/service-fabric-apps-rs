@@ -18,5 +18,5 @@ fn main() {
         "--filter",
         "Microsoft.ServiceFabric.FabricStrings",
     ]);
-    println!("{}", log);
+    println!("{log}");
 }

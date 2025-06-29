@@ -31,7 +31,7 @@ static RETRY_COUNT_SHORT: usize = 10;
 static SVC_URI: &str = "fabric:/KvMap/KvMapService";
 lazy_static! {
     static ref KV_MAP_SVC_URI: WString = WString::from(SVC_URI);
-    static ref FABRIC_CLIENT: FabricClient = FabricClient::builder().build();
+    static ref FABRIC_CLIENT: FabricClient = FabricClient::builder().build().unwrap();
 }
 
 // helper for managing app
@@ -239,13 +239,13 @@ async fn read_write_test() {
     // resolve port on local onebox
     let (primary_addr, secondary_addr) = c.get_addrs_retry().await;
 
-    println!("primary_addr: {}", primary_addr);
+    println!("primary_addr: {primary_addr}",);
     // connect primary via grpc
     let mut client = crate::rpc::kvmap_service_client::KvmapServiceClient::connect(primary_addr)
         .await
         .unwrap();
     // connect secondary
-    println!("secondary_addr: {}", secondary_addr);
+    println!("secondary_addr: {secondary_addr}",);
     let mut sec_client =
         crate::rpc::kvmap_service_client::KvmapServiceClient::connect(secondary_addr)
             .await
@@ -263,7 +263,7 @@ async fn read_write_test() {
         let sn = response.sn;
         assert!(response.ok);
         assert_ne!(sn, 0);
-        println!("RESPONSE={:?}", response);
+        println!("RESPONSE={response:?}");
 
         // read from primary
         {
@@ -271,7 +271,7 @@ async fn read_write_test() {
             let response2 = client.get_data(req2).await.expect("rpc faile").into_inner();
             assert_eq!(response2.data, data);
             assert_eq!(sn, response2.sn);
-            println!("RESPONSE={:?}", response2);
+            println!("RESPONSE={response2:?}");
         }
         // read from secondary
         {
@@ -283,7 +283,7 @@ async fn read_write_test() {
                 .into_inner();
             assert_eq!(response2.data, data);
             assert_eq!(sn, response2.sn);
-            println!("RESPONSE={:?}", response2);
+            println!("RESPONSE={response2:?}");
         }
     }
 

@@ -313,9 +313,9 @@ impl StatefulServiceReplica for Replica {
             .clone()
             .unwrap();
         let rpc_port = self.ctx.rpc_port;
-        let svc_addr = format!("[::1]:{}", rpc_port);
+        let svc_addr = format!("[::1]:{rpc_port}",);
         // include scheme in the svc addr returned to SF.
-        let addr_res = WString::from(format!("http://{}", svc_addr));
+        let addr_res = WString::from(format!("http://{svc_addr}",));
         // clean up pending stuff
         let curr_role = self.role.lock().await.get_mut().clone();
         if curr_role == newrole {

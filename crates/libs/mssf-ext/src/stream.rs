@@ -9,7 +9,7 @@ use mssf_com::{
 };
 use mssf_core::{
     runtime::executor::Executor,
-    sync::{fabric_begin_end_proxy2, BridgeContext3, CancellationToken},
+    sync::{fabric_begin_end_proxy, BridgeContext, CancellationToken},
 };
 use windows_core::{implement, Interface};
 
@@ -47,7 +47,7 @@ impl<T: OperationDataStream, E: Executor> IFabricOperationDataStream_Impl
         callback: windows_core::Ref<IFabricAsyncOperationCallback>,
     ) -> mssf_core::WinResult<IFabricAsyncOperationContext> {
         let inner = self.inner.clone();
-        let (ctx, token) = BridgeContext3::make(callback);
+        let (ctx, token) = BridgeContext::make(callback);
         ctx.spawn(&self.rt, async move {
             inner
                 .get_next(token)
@@ -67,7 +67,7 @@ impl<T: OperationDataStream, E: Executor> IFabricOperationDataStream_Impl
         &self,
         context: windows_core::Ref<IFabricAsyncOperationContext>,
     ) -> mssf_core::WinResult<IFabricOperationData> {
-        BridgeContext3::result(context)?
+        BridgeContext::result(context)?
     }
 }
 
@@ -89,7 +89,7 @@ impl OperationDataStream for OperationDataStreamProxy {
         // get the data from com
         let com1 = &self.com_impl;
         let com2 = self.com_impl.clone();
-        let rx = fabric_begin_end_proxy2(
+        let rx = fabric_begin_end_proxy(
             move |callback| unsafe { com1.BeginGetNext(callback) },
             move |ctx| unsafe { com2.EndGetNext(ctx) },
             Some(cancellation_token),
@@ -130,7 +130,7 @@ impl OperationStream for OperationStreamProxy {
     ) -> mssf_core::Result<Option<impl Operation>> {
         let com1 = &self.com_impl;
         let com2 = self.com_impl.clone();
-        let rx = fabric_begin_end_proxy2(
+        let rx = fabric_begin_end_proxy(
             move |callback| unsafe { com1.BeginGetOperation(callback) },
             move |ctx| unsafe { com2.EndGetOperation(ctx) },
             Some(cancellation_token),

@@ -132,7 +132,7 @@ impl Service {
         self.rt.spawn(async move {
             info!("start grpc server on port: {}", port);
             let svc = rpc::rpc_svc::new(store);
-            let addr = format!("[::1]:{}", port).parse().unwrap();
+            let addr = format!("[::1]:{port}").parse().unwrap();
 
             Server::builder()
                 .add_service(
@@ -361,7 +361,7 @@ pub mod rpc {
                     let resp = AddResponse {};
                     Ok(tonic::Response::new(resp))
                 }
-                Err(e) => Err(tonic::Status::internal(format!("cannot add : {}", e))),
+                Err(e) => Err(tonic::Status::internal(format!("cannot add : {e}"))),
             }
         }
         async fn get(
@@ -387,7 +387,7 @@ pub mod rpc {
                     let resp = GetResponse { val };
                     Ok(tonic::Response::new(resp))
                 }
-                Err(e) => Err(tonic::Status::internal(format!("cannot get : {}", e))),
+                Err(e) => Err(tonic::Status::internal(format!("cannot get : {e}"))),
             }
         }
         async fn remove(
@@ -414,7 +414,7 @@ pub mod rpc {
                     let resp = RemoveResponse { removed };
                     Ok(tonic::Response::new(resp))
                 }
-                Err(e) => Err(tonic::Status::internal(format!("cannot remove : {}", e))),
+                Err(e) => Err(tonic::Status::internal(format!("cannot remove : {e}"))),
             }
         }
 
@@ -443,7 +443,7 @@ pub mod rpc {
                     };
                     Ok(tonic::Response::new(resp))
                 }
-                Err(e) => Err(tonic::Status::internal(format!("cannot remove : {}", e))),
+                Err(e) => Err(tonic::Status::internal(format!("cannot remove : {e}",))),
             }
         }
     }
@@ -463,7 +463,7 @@ pub mod rpc {
         #[tokio::test]
         async fn test_connect() {
             // resolve port on local onebox
-            let fc = FabricClient::builder().build();
+            let fc = FabricClient::builder().build().unwrap();
             let svcc = fc.get_service_manager();
             let resolution = svcc
                 .resolve_service_partition(
@@ -513,7 +513,7 @@ pub mod rpc {
                     val: String::from("myval"),
                 });
                 let response = client.add(req).await;
-                println!("RESPONSE={:?}", response);
+                println!("RESPONSE={response:?}",);
             }
             // get
             {
@@ -522,7 +522,7 @@ pub mod rpc {
                     key: String::from("mykey"),
                 });
                 let response = client.get(req).await;
-                println!("RESPONSE={:?}", response);
+                println!("RESPONSE={response:?}",);
             }
         }
     }

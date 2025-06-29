@@ -2,7 +2,7 @@ use std::time::Duration;
 
 use mssf_core::{
     runtime::executor::DefaultExecutor,
-    sync::{BridgeContext3, CancellationToken},
+    sync::{BridgeContext, CancellationToken},
     ErrorCode,
 };
 use windows_core::{implement, Interface};
@@ -146,7 +146,7 @@ impl IFabricStringsApiTable_Impl for ApiTableBridge_Impl {
         let s1 = str1.unwrap().clone();
         let s2 = str2.unwrap().clone();
         let inner = self.inner.clone();
-        let (ctx, token) = BridgeContext3::make(callback);
+        let (ctx, token) = BridgeContext::make(callback);
         ctx.spawn(&self.rt, async move {
             inner
                 .concat_strings(
@@ -164,6 +164,6 @@ impl IFabricStringsApiTable_Impl for ApiTableBridge_Impl {
         &self,
         context: windows_core::Ref<mssf_com::FabricCommon::IFabricAsyncOperationContext>,
     ) -> windows_core::Result<IFabricStringsBytes> {
-        BridgeContext3::result(context)?
+        BridgeContext::result(context)?
     }
 }
