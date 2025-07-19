@@ -1,3 +1,6 @@
+// This is needed because windows_core macro looks for the `windows_core` token.
+extern crate mssf_pal as windows_core;
+
 use std::time::Duration;
 
 use mssf_core::{

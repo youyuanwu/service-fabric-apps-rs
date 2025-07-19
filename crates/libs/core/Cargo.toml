@@ -7,9 +7,9 @@ edition = "2021"
 [dependencies]
 mssf-com.workspace = true
 mssf-core.workspace = true
+mssf-pal.workspace = true
 # tokio oneshot
 tokio = { version = "1", features = ["sync"] }
-windows-core.workspace = true
 
 [dependencies.sfrc-c]
 path = "../c"

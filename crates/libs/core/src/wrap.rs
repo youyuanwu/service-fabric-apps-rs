@@ -9,6 +9,7 @@ use std::{ffi::c_void, ptr::addr_of_mut};
 
 use mssf_com::FabricRuntime::{IFabricPrimaryReplicator, IFabricStatefulServicePartition};
 use mssf_core::{Error, Interface, WString, HRESULT, PCWSTR};
+use mssf_pal::BOOL;
 use sfrc_c::ReliableCollectionRuntime::{
     fnNotifyAsyncCompletion, fnNotifyCreateEnumeratorAsyncCompletion, fnNotifyGetAsyncCompletion,
     fnNotifyGetOrAddStateProviderAsyncCompletion, fnNotifyRemoveAsyncCompletion,
@@ -25,7 +26,6 @@ use sfrc_c::ReliableCollectionRuntime::{
     TxnReplicator_Settings, RELIABLECOLLECTION_API_VERSION,
 };
 use tokio::sync::oneshot::{self, Receiver, Sender};
-use windows_core::BOOL;
 // do module init
 pub struct ReliableCollectionRuntime {}
 

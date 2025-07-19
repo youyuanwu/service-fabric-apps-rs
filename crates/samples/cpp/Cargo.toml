@@ -13,8 +13,8 @@ crate-type = ["dylib"]
 
 [dependencies]
 windows-bindgen.workspace = true
-windows-core.workspace = true
 mssf-com.workspace = true
 mssf-core.workspace = true
+mssf-pal.workspace = true
 tokio.workspace = true
 lazy_static.workspace = true

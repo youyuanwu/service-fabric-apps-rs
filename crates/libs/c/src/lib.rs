@@ -14,7 +14,7 @@ pub mod ReliableCollectionRuntime;
 
 // Special usage for mssf_pal.
 // See mssf_pal documentations for why this is used this way.
-use extern_windows_core::*;
+use mssf_pal::*;
 extern crate self as windows;
 extern crate self as windows_core;
 

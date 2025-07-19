@@ -6,8 +6,8 @@ edition = "2021"
 [dependencies]
 mssf-core.workspace = true
 mssf-com.workspace = true
+mssf-pal.workspace = true
 trait-variant.workspace = true
 bytes.workspace = true
-windows-core.workspace = true
 tracing.workspace = true
 tokio.workspace = true

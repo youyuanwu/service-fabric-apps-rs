@@ -4,6 +4,9 @@
 // license information.
 // ------------------------------------------------------------
 
+// This is needed because windows_core macro looks for the `windows_core` token.
+extern crate mssf_pal as windows_core;
+
 use mssf_core::WString;
 use mssf_core::{
     debug::wait_for_debugger,
