@@ -82,5 +82,7 @@ add_custom_target(build_rust ALL
     WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
 )
 
+add_subdirectory(container)
+
 enable_testing()
 add_subdirectory(crates/samples)
