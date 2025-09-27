@@ -66,7 +66,6 @@ find_program (
 add_custom_target(generate_rust
   COMMAND ${cargo_exe} run -p tools_api
   COMMAND ${cargo_exe} run -p cpp_tools_api
-  COMMAND ${cargo_exe} fmt -p sfrc-c # format the generated crate
   WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
   DEPENDS generate_winmd
 )

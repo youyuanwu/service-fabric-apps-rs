@@ -10,7 +10,7 @@ use std::{ffi::c_void, ptr::addr_of_mut};
 use mssf_com::FabricRuntime::{IFabricPrimaryReplicator, IFabricStatefulServicePartition};
 use mssf_core::{Error, Interface, WString, HRESULT, PCWSTR};
 use mssf_pal::BOOL;
-use sfrc_c::ReliableCollectionRuntime::{
+use sfrc_c::{
     fnNotifyAsyncCompletion, fnNotifyCreateEnumeratorAsyncCompletion, fnNotifyGetAsyncCompletion,
     fnNotifyGetOrAddStateProviderAsyncCompletion, fnNotifyRemoveAsyncCompletion,
     fnNotifyStoreKeyValueEnumeratorMoveNextAsyncCompletion, Buffer, Buffer_Release,

@@ -22,7 +22,7 @@ use mssf_core::{
     GUID,
 };
 use mssf_core::{Error, WString};
-use sfrc_c::ReliableCollectionRuntime::{IFabricDataLossHandler, TxnReplicator_Settings};
+use sfrc_c::{IFabricDataLossHandler, TxnReplicator_Settings};
 use sfrc_core::wrap::{get_txn_replicator, TxnReplicaReplicator};
 use tokio::sync::oneshot::{self, Sender};
 use tonic::transport::Server;
@@ -228,7 +228,7 @@ pub mod rpc {
 
     use mssf_core::ErrorCode::E_NOT_FOUND;
     use mssf_core::{Error, WString, PCWSTR};
-    use sfrc_c::ReliableCollectionRuntime::{
+    use sfrc_c::{
         StateProvider_Info, StateProvider_Info_V1_Size, StateProvider_Kind_Store,
         Store_LockMode_Exclusive,
     };

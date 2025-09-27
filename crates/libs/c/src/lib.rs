@@ -10,7 +10,8 @@
     non_upper_case_globals,
     clippy::all
 )]
-pub mod ReliableCollectionRuntime;
+mod ReliableCollectionRuntime;
+pub use ReliableCollectionRuntime::Microsoft::ServiceFabric::ReliableCollectionRuntime::*;
 
 // Special usage for mssf_pal.
 // See mssf_pal documentations for why this is used this way.

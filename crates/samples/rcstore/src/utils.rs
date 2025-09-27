@@ -6,7 +6,7 @@
 
 use mssf_com::FabricCommon::{IFabricAsyncOperationCallback, IFabricAsyncOperationContext};
 use mssf_core::sync::wait::AsyncContext;
-use sfrc_c::ReliableCollectionRuntime::{IFabricDataLossHandler, IFabricDataLossHandler_Impl};
+use sfrc_c::{IFabricDataLossHandler, IFabricDataLossHandler_Impl};
 use windows_core::implement;
 
 // dummy handler
