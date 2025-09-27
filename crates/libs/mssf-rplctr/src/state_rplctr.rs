@@ -4,8 +4,7 @@ use std::sync::Arc;
 
 use bytes::{Buf, BytesMut};
 use mssf_core::{
-    sync::{CancellationToken, FabricReceiver},
-    types::ReplicatorSettings,
+    runtime::executor::BoxedCancelToken, sync::FabricReceiver, types::ReplicatorSettings,
 };
 use mssf_ext::traits::{Operation, OperationData, OperationStream, StateProvider, StateReplicator};
 
@@ -26,7 +25,7 @@ impl<T: StateProvider> StateReplicator for StRplctr<T> {
     fn replicate(
         &self,
         _operation_data: impl OperationData,
-        _: CancellationToken,
+        _: BoxedCancelToken,
     ) -> (i64, FabricReceiver<mssf_core::WinResult<i64>>) {
         todo!()
     }
@@ -55,7 +54,7 @@ pub struct DummyOperationStream {}
 impl OperationStream for DummyOperationStream {
     async fn get_operation(
         &self,
-        _: CancellationToken,
+        _: BoxedCancelToken,
     ) -> mssf_core::Result<Option<impl Operation>> {
         Ok(Some(DummyOperation {}))
     }

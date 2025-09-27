@@ -3,11 +3,8 @@ extern crate mssf_pal as windows_core;
 
 use std::time::Duration;
 
-use mssf_core::{
-    runtime::executor::DefaultExecutor,
-    sync::{BridgeContext, CancellationToken},
-    ErrorCode,
-};
+use mssf_core::{runtime::executor::BoxedCancelToken, sync::BridgeContext, ErrorCode};
+use mssf_util::tokio::TokioExecutor;
 use windows_core::{implement, Interface};
 
 #[allow(non_snake_case)]
@@ -44,7 +41,7 @@ pub unsafe extern "system" fn GetFabricStringsApiTable(
 }
 
 fn get_fabric_strings_api_table_internal() -> windows_core::Result<IFabricStringsApiTable> {
-    Ok(ApiTableBridge::new(DefaultExecutor::new(RT.handle().clone())).into())
+    Ok(ApiTableBridge::new(TokioExecutor::new(RT.handle().clone())).into())
 }
 
 pub struct StringProxy {
@@ -99,7 +96,7 @@ impl ApiTable {
         str1: IFabricStringsBytes,
         str2: IFabricStringsBytes,
         timeout: Duration,
-        cancellation_token: CancellationToken,
+        cancellation_token: BoxedCancelToken,
     ) -> mssf_core::Result<IFabricStringsBytes> {
         // operation slowness
         let default_duration = Duration::from_millis(50);
@@ -107,7 +104,7 @@ impl ApiTable {
         let sleep = std::cmp::min(default_duration, timeout);
 
         tokio::select! {
-            _ = cancellation_token.cancelled() => { Err(ErrorCode::E_ABORT.into()) }
+            _ = cancellation_token.wait() => { Err(ErrorCode::E_ABORT.into()) }
             _ = tokio::time::sleep(sleep) => {
                 if timeout < default_duration{
                     Err(ErrorCode::FABRIC_E_TIMEOUT.into())
@@ -126,11 +123,11 @@ impl ApiTable {
 #[implement(IFabricStringsApiTable)]
 pub struct ApiTableBridge {
     inner: ApiTable,
-    rt: DefaultExecutor,
+    rt: TokioExecutor,
 }
 
 impl ApiTableBridge {
-    fn new(rt: DefaultExecutor) -> Self {
+    fn new(rt: TokioExecutor) -> Self {
         Self {
             inner: ApiTable {},
             rt,

@@ -2,10 +2,9 @@ use std::{cell::Cell, sync::Arc};
 
 use mssf_core::{
     runtime::{
-        executor::DefaultExecutor,
+        executor::BoxedCancelToken,
         stateful::{PrimaryReplicator, Replicator},
     },
-    sync::CancellationToken,
     types::{
         Epoch, ReplicaInformation, ReplicaRole, ReplicaSetConfig, ReplicaSetQuorumMode,
         ReplicatorSettings,
@@ -13,20 +12,21 @@ use mssf_core::{
     WString,
 };
 use mssf_ext::traits::{StateProvider, StateReplicator};
+use mssf_util::tokio::{TokioCancelToken, TokioExecutor};
 use tokio::task::JoinHandle;
 
 use crate::{rplctr_inner::RplctrInner, state_rplctr::StRplctr};
 
 pub struct Rplctr<T: StateProvider> {
     inner: Arc<RplctrInner<T>>,
-    close_token: std::sync::Mutex<Cell<Option<CancellationToken>>>,
+    close_token: std::sync::Mutex<Cell<Option<BoxedCancelToken>>>,
     close_wait: std::sync::Mutex<Cell<Option<JoinHandle<()>>>>,
 }
 
 impl<T: StateProvider> Rplctr<T> {
     pub fn new(
         state_prov: T,
-        rt: DefaultExecutor,
+        rt: TokioExecutor,
         settings: &ReplicatorSettings,
     ) -> (Self, impl StateReplicator) {
         // Create shared inner for rpcltr(this) and state replicator.
@@ -44,9 +44,9 @@ impl<T: StateProvider> Rplctr<T> {
 }
 
 impl<T: StateProvider> Replicator for Rplctr<T> {
-    async fn open(&self, _: CancellationToken) -> mssf_core::Result<WString> {
+    async fn open(&self, _: BoxedCancelToken) -> mssf_core::Result<WString> {
         // start rpc server
-        let close_token = CancellationToken::new();
+        let close_token = TokioCancelToken::new_boxed();
         let close_token_cp = close_token.clone();
         let inner_cp = self.inner.clone();
         let close_handle = tokio::spawn(async move {
@@ -58,7 +58,7 @@ impl<T: StateProvider> Replicator for Rplctr<T> {
         assert!(prev_h.is_none());
         Ok(WString::from(self.inner.get_addr()))
     }
-    async fn close(&self, _: CancellationToken) -> mssf_core::Result<()> {
+    async fn close(&self, _: BoxedCancelToken) -> mssf_core::Result<()> {
         // cancel background server
         let token = self
             .close_token
@@ -81,12 +81,12 @@ impl<T: StateProvider> Replicator for Rplctr<T> {
         &self,
         epoch: &Epoch,
         role: &ReplicaRole,
-        _: CancellationToken,
+        _: BoxedCancelToken,
     ) -> mssf_core::Result<()> {
         self.inner.change_role(role.clone(), epoch.clone()).await
     }
     // called only on secondaries.
-    async fn update_epoch(&self, _epoch: &Epoch, _: CancellationToken) -> mssf_core::Result<()> {
+    async fn update_epoch(&self, _epoch: &Epoch, _: BoxedCancelToken) -> mssf_core::Result<()> {
         todo!()
     }
     fn get_current_progress(&self) -> mssf_core::Result<i64> {
@@ -101,7 +101,7 @@ impl<T: StateProvider> Replicator for Rplctr<T> {
 }
 
 impl<T: StateProvider> PrimaryReplicator for Rplctr<T> {
-    async fn on_data_loss(&self, cancellation_token: CancellationToken) -> mssf_core::Result<u8> {
+    async fn on_data_loss(&self, cancellation_token: BoxedCancelToken) -> mssf_core::Result<u8> {
         self.inner
             .get_state_prov()
             .on_data_loss(cancellation_token)
@@ -121,7 +121,7 @@ impl<T: StateProvider> PrimaryReplicator for Rplctr<T> {
     async fn wait_for_catch_up_quorum(
         &self,
         _catchupmode: ReplicaSetQuorumMode,
-        _: CancellationToken,
+        _: BoxedCancelToken,
     ) -> mssf_core::Result<()> {
         todo!()
     }
@@ -134,7 +134,7 @@ impl<T: StateProvider> PrimaryReplicator for Rplctr<T> {
     async fn build_replica(
         &self,
         _replica: &ReplicaInformation,
-        _: CancellationToken,
+        _: BoxedCancelToken,
     ) -> mssf_core::Result<()> {
         todo!()
     }

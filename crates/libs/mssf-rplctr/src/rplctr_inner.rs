@@ -2,12 +2,12 @@ use std::sync::Arc;
 
 use bytes::Bytes;
 use mssf_core::{
-    runtime::executor::DefaultExecutor,
-    sync::CancellationToken,
+    runtime::executor::BoxedCancelToken,
     types::{Epoch, ReplicaRole, ReplicatorSettings},
     ErrorCode,
 };
 use mssf_ext::traits::{Operation, OperationStream, StateProvider};
+use mssf_util::tokio::TokioExecutor;
 use tokio::sync::mpsc;
 
 use crate::rpc::RpcService;
@@ -15,7 +15,7 @@ use crate::rpc::RpcService;
 /// Inner shared between replicator and stateprovider
 pub struct RplctrInner<T: StateProvider> {
     state_prov: T,
-    _rt: DefaultExecutor,
+    _rt: TokioExecutor,
     addr: String,
     // secondary receives from primary
     sec_rplct_stream_rx: Arc<tokio::sync::Mutex<mpsc::Receiver<(i64, Bytes)>>>,
@@ -31,7 +31,7 @@ impl<T: StateProvider> RplctrInner<T> {
         &self.state_prov
     }
 
-    pub fn new(state_prov: T, rt: DefaultExecutor, settings: &ReplicatorSettings) -> Self {
+    pub fn new(state_prov: T, rt: TokioExecutor, settings: &ReplicatorSettings) -> Self {
         let (tx, rx) = mpsc::channel(100);
         Self {
             state_prov,
@@ -59,14 +59,14 @@ impl<T: StateProvider> RplctrInner<T> {
     }
 
     // open rpc server and block current task.
-    pub async fn serve(self: Arc<Self>, token: CancellationToken) {
+    pub async fn serve(self: Arc<Self>, token: BoxedCancelToken) {
         let addr = self.addr.parse().unwrap();
         tonic::transport::Server::builder()
             .add_service(crate::rpc::rplctr_service_server::RplctrServiceServer::new(
                 RpcService::new(self.clone()),
             ))
             .serve_with_shutdown(addr, async {
-                token.cancelled().await;
+                token.wait().await;
                 println!("Graceful shutdown tonic complete")
             })
             .await
@@ -86,7 +86,7 @@ pub struct ReplicationOperationStream {
 impl OperationStream for ReplicationOperationStream {
     async fn get_operation(
         &self,
-        _: CancellationToken,
+        _: BoxedCancelToken,
     ) -> mssf_core::Result<Option<impl Operation>> {
         let (sn, data) = self
             .inner

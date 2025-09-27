@@ -8,8 +8,8 @@ use mssf_com::{
     },
 };
 use mssf_core::{
-    runtime::executor::Executor,
-    sync::{fabric_begin_end_proxy, BridgeContext, CancellationToken},
+    runtime::executor::{BoxedCancelToken, Executor},
+    sync::{fabric_begin_end_proxy, BridgeContext},
 };
 use windows_core::{implement, Interface};
 
@@ -84,7 +84,7 @@ impl OperationDataStreamProxy {
 impl OperationDataStream for OperationDataStreamProxy {
     async fn get_next(
         &self,
-        cancellation_token: CancellationToken,
+        cancellation_token: BoxedCancelToken,
     ) -> mssf_core::Result<Option<impl OperationData>> {
         // get the data from com
         let com1 = &self.com_impl;
@@ -126,7 +126,7 @@ impl OperationStreamProxy {
 impl OperationStream for OperationStreamProxy {
     async fn get_operation(
         &self,
-        cancellation_token: CancellationToken,
+        cancellation_token: BoxedCancelToken,
     ) -> mssf_core::Result<Option<impl Operation>> {
         let com1 = &self.com_impl;
         let com2 = self.com_impl.clone();
@@ -165,7 +165,8 @@ mod test {
 
     use bytes::{Buf, Bytes};
     use mssf_com::FabricRuntime::IFabricOperationDataStream;
-    use mssf_core::{runtime::executor::DefaultExecutor, sync::CancellationToken};
+    use mssf_core::runtime::executor::BoxedCancelToken;
+    use mssf_util::tokio::{TokioCancelToken, TokioExecutor};
 
     use crate::{
         data::OperationDataBuf,
@@ -183,7 +184,7 @@ mod test {
     impl OperationDataStream for MyOperationDataStream {
         async fn get_next(
             &self,
-            _: CancellationToken,
+            _: BoxedCancelToken,
         ) -> mssf_core::Result<Option<impl OperationData>> {
             let mut c = self.count.lock().unwrap();
             if c.get() == 2 {
@@ -200,7 +201,7 @@ mod test {
     async fn test_data_stream() {
         // get handle
         let h = tokio::runtime::Handle::current();
-        let rt = DefaultExecutor::new(h);
+        let rt = TokioExecutor::new(h);
         let mystream = MyOperationDataStream {
             count: Mutex::new(Cell::new(0)),
         };
@@ -211,18 +212,18 @@ mod test {
         let proxy = OperationDataStreamProxy::new(bridge);
 
         let d0 = proxy
-            .get_next(CancellationToken::new())
+            .get_next(TokioCancelToken::new_boxed())
             .await
             .unwrap()
             .unwrap();
         assert_eq!(d0.chunk(), "value0".as_bytes());
         let d1 = proxy
-            .get_next(CancellationToken::new())
+            .get_next(TokioCancelToken::new_boxed())
             .await
             .unwrap()
             .unwrap();
         assert_eq!(d1.chunk(), "value1".as_bytes());
-        let d2 = proxy.get_next(CancellationToken::new()).await.unwrap();
+        let d2 = proxy.get_next(TokioCancelToken::new_boxed()).await.unwrap();
         assert!(d2.is_none());
     }
 }

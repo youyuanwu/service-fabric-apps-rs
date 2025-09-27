@@ -16,6 +16,7 @@ tokio.workspace = true
 mssf-core.workspace = true
 mssf-com.workspace = true
 mssf-pal.workspace = true
+mssf-util.workspace = true
 tonic.workspace = true
 prost.workspace = true
 clap.workspace = true

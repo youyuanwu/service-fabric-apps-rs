@@ -7,6 +7,7 @@ edition = "2021"
 mssf-core.workspace = true
 mssf-com.workspace = true
 mssf-ext = {path = "../../libs/mssf-ext"}
+mssf-util.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true
 tokio.workspace = true

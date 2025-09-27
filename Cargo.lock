@@ -254,6 +254,7 @@ dependencies = [
  "mssf-com",
  "mssf-core",
  "mssf-pal",
+ "mssf-util",
  "tokio",
 ]
 
@@ -544,6 +545,7 @@ dependencies = [
  "mssf-com",
  "mssf-core",
  "mssf-ext",
+ "mssf-util",
  "prost",
  "prost-build",
  "serde",
@@ -640,27 +642,26 @@ dependencies = [
 
 [[package]]
 name = "mssf-com"
-version = "0.2.0"
+version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e6ce47822ac6ebc3c7f26a64dd2eabd3f1885ebea7e25c56fe3752855061d834"
+checksum = "38384f0b179aed8a808c412e6ecc367b0594e269302acc67316f564b9d793bb2"
 dependencies = [
  "mssf-pal",
 ]
 
 [[package]]
 name = "mssf-core"
-version = "0.2.1"
+version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a8e5f39f725c533a4baae831fac059bb835c0031cc2f73b3e579ebb084482582"
+checksum = "dc7274fc00a856187ead78344b93d3f1632c8cad95ef6960d692ae58ad06fe4a"
 dependencies = [
  "bitflags",
  "config",
+ "futures-channel",
  "lazy_static",
  "libloading",
  "mssf-com",
  "mssf-pal",
- "tokio",
- "tokio-util",
  "tracing",
  "trait-variant",
  "windows",
@@ -674,6 +675,7 @@ dependencies = [
  "mssf-com",
  "mssf-core",
  "mssf-pal",
+ "mssf-util",
  "tokio",
  "tracing",
  "trait-variant",
@@ -681,9 +683,9 @@ dependencies = [
 
 [[package]]
 name = "mssf-pal"
-version = "0.2.0"
+version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2e7336b89b97421612000c99dfb0cba69b957a74a27da34a78786d6c4c29a98d"
+checksum = "f1886eee4dc19a101068732f1434e6a6dc5c8f9138ef708e59d0cead9b3e3e02"
 dependencies = [
  "windows-core",
 ]
@@ -695,11 +697,24 @@ dependencies = [
  "bytes",
  "mssf-core",
  "mssf-ext",
+ "mssf-util",
  "prost",
  "prost-build",
  "tokio",
  "tonic",
  "tonic-build",
+]
+
+[[package]]
+name = "mssf-util"
+version = "0.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "29405d7cd5cc8420e7b196614adb8ae0229f19282c7bf11ddcb6d091f84cf3ef"
+dependencies = [
+ "mssf-core",
+ "tokio",
+ "tokio-util",
+ "tracing",
 ]
 
 [[package]]
@@ -900,6 +915,7 @@ dependencies = [
  "mssf-com",
  "mssf-core",
  "mssf-pal",
+ "mssf-util",
  "prost",
  "prost-build",
  "sfrc-c",

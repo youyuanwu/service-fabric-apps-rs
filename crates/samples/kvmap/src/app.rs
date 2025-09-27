@@ -1,10 +1,10 @@
 use std::{cell::Cell, io::ErrorKind, path::Path};
 
 use bytes::Bytes;
-use mssf_core::sync::CancellationToken;
 use mssf_ext::{
     data::OperationDataBuf, state_replicator::StateReplicatorProxy, traits::StateReplicator,
 };
+use mssf_util::tokio::TokioCancelToken;
 use tracing::info;
 
 use crate::data::SingleDB;
@@ -62,7 +62,7 @@ impl KvApp {
         data: String,
     ) -> std::io::Result<i64> {
         let buf = OperationDataBuf::new(Bytes::from(data.clone()));
-        let (sn, fu) = sr.replicate(buf, CancellationToken::new());
+        let (sn, fu) = sr.replicate(buf, TokioCancelToken::new_boxed());
         let sn2 = fu.await.unwrap()?;
         assert_eq!(sn, sn2);
         self.set_data(sn, data.clone()).await.unwrap();

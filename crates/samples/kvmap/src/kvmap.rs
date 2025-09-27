@@ -7,7 +7,7 @@ use mssf_com::{
 };
 use mssf_core::{
     runtime::{
-        executor::{DefaultExecutor, Executor},
+        executor::BoxedCancelToken,
         stateful::{PrimaryReplicator, StatefulServiceFactory, StatefulServiceReplica},
         stateful_proxy::{PrimaryReplicatorProxy, StatefulServicePartition},
     },
@@ -23,9 +23,9 @@ use mssf_ext::{
         StateReplicator,
     },
 };
+use mssf_util::tokio::{TokioCancelToken, TokioExecutor};
 use serde::{Deserialize, Serialize};
 use tokio::{select, sync::Mutex};
-use tokio_util::sync::CancellationToken;
 use tonic::transport::Server;
 use tracing::{error, info};
 
@@ -132,7 +132,7 @@ struct CopyStatePayload {
 impl<T: OperationDataStream> OperationDataStream for CopyStateStream<T> {
     async fn get_next(
         &self,
-        cancellation_token: CancellationToken,
+        cancellation_token: BoxedCancelToken,
     ) -> mssf_core::Result<Option<impl OperationData>> {
         // if ctx stream is end we end as well.
         let ctx = self.ctx_stream.get_next(cancellation_token).await?;
@@ -170,9 +170,9 @@ pub struct Replica {
     ctx: ProcCtx,
     state_replicator: Mutex<Cell<Option<StateReplicatorProxy>>>,
     // cancel background work
-    background_cancel: Mutex<Cell<Option<CancellationToken>>>,
+    background_cancel: Mutex<Cell<Option<BoxedCancelToken>>>,
     // cancel rpc server
-    rpc_cancel: Mutex<Cell<Option<CancellationToken>>>,
+    rpc_cancel: Mutex<Cell<Option<BoxedCancelToken>>>,
     state: ReplicaState,
     role: Mutex<Cell<ReplicaRole>>,
 }
@@ -190,21 +190,21 @@ impl Replica {
     }
 
     fn start_rpc(
-        rt: DefaultExecutor,
+        rt: TokioExecutor,
         sr: StateReplicatorProxy,
         app: Arc<KvApp>,
         svc_addr: String,
-        token: CancellationToken,
+        token: BoxedCancelToken,
     ) {
         // start rpc server
-        rt.spawn(async move {
+        rt.get_ref().spawn(async move {
             info!("start grpc server on addr: {}", svc_addr);
             let svc = crate::rpc::KvMapRpc::new(app, sr);
             let addr = svc_addr.parse().unwrap();
             Server::builder()
                 .add_service(KvmapServiceServer::new(svc))
                 .serve_with_shutdown(addr, async {
-                    token.cancelled().await;
+                    token.wait().await;
                     println!("Graceful shutdown tonic complete")
                 })
                 .await
@@ -218,7 +218,7 @@ impl StatefulServiceReplica for Replica {
         &self,
         openmode: OpenMode,
         partition: &StatefulServicePartition,
-        _: CancellationToken,
+        _: BoxedCancelToken,
     ) -> mssf_core::Result<impl PrimaryReplicator> {
         let com = partition.get_com();
 
@@ -276,14 +276,14 @@ impl StatefulServiceReplica for Replica {
         }
 
         // initiate the cancel token for closing.
-        // let new_token = CancellationToken::new();
+        // let new_token = BoxedCancelToken::new();
         // let token = self.background_cancel.lock().await;
         // let prev = token.replace(Some(new_token));
         // assert!(prev.is_none());
 
         // initiate the rpc server token
-        let rpc_token = CancellationToken::new();
-        let new_svc_token = rpc_token.child_token();
+        let rpc_token = TokioCancelToken::new_boxed();
+        let new_svc_token = rpc_token.clone();
         {
             let token = self.rpc_cancel.lock().await;
             let prev = token.replace(Some(rpc_token));
@@ -302,7 +302,7 @@ impl StatefulServiceReplica for Replica {
     async fn change_role(
         &self,
         newrole: ReplicaRole,
-        _: CancellationToken,
+        _: BoxedCancelToken,
     ) -> mssf_core::Result<WString> {
         // get the state replicator opened.
         let sr = self
@@ -324,7 +324,7 @@ impl StatefulServiceReplica for Replica {
         }
 
         // init or re-init background token
-        let token = CancellationToken::new();
+        let token = TokioCancelToken::new_boxed();
         if !matches!(curr_role, ReplicaRole::None | ReplicaRole::Unknown) {
             // has background stuff running, cancel it
             let mut lk = self.background_cancel.lock().await;
@@ -339,12 +339,12 @@ impl StatefulServiceReplica for Replica {
                 // start rpc server on secondary
                 // Self::start_rpc(self.ctx.rt.clone(), sr, app, svc_addr, new_svc_token);
                 // Handle replicate stream from primary
-                self.ctx.rt.spawn(async move {
+                self.ctx.rt.get_ref().spawn(async move {
                     let rplct_stream = sr.get_replication_stream().unwrap();
                     loop {
                         let opt = select! {
-                            _ = token.cancelled() => { None }
-                            res = rplct_stream.get_operation(CancellationToken::new()) => {
+                            _ = token.wait() => { None }
+                            res = rplct_stream.get_operation(TokioCancelToken::new_boxed()) => {
                                 res.unwrap() // get op should be ok
                             }
                         };
@@ -366,11 +366,11 @@ impl StatefulServiceReplica for Replica {
                 });
             }
             ReplicaRole::IdleSecondary => {
-                self.ctx.rt.spawn(async move {
+                self.ctx.rt.get_ref().spawn(async move {
                     // handle copying. i.e. catch up from primary. The stream is from copy_state from primary
                     let copy_stream = sr.get_copy_stream().unwrap();
                     while let Some(c) = copy_stream
-                        .get_operation(CancellationToken::new())
+                        .get_operation(TokioCancelToken::new_boxed())
                         .await
                         .unwrap()
                     {
@@ -419,7 +419,7 @@ impl StatefulServiceReplica for Replica {
         Ok(addr_res)
     }
 
-    async fn close(&self, _: CancellationToken) -> mssf_core::Result<()> {
+    async fn close(&self, _: BoxedCancelToken) -> mssf_core::Result<()> {
         // cancel background
         {
             let token = self.background_cancel.lock().await.take();
@@ -454,12 +454,12 @@ impl StatefulServiceReplica for Replica {
 }
 
 pub struct KvStateProvider {
-    _rt: DefaultExecutor,
+    _rt: TokioExecutor,
     state: ReplicaState,
 }
 
 impl KvStateProvider {
-    fn create(rt: DefaultExecutor, state: ReplicaState) -> Self {
+    fn create(rt: TokioExecutor, state: ReplicaState) -> Self {
         Self { _rt: rt, state }
     }
 }
@@ -469,7 +469,7 @@ impl StateProvider for KvStateProvider {
         &self,
         epoch: &Epoch,
         previousepochlastsequencenumber: i64,
-        _: CancellationToken,
+        _: BoxedCancelToken,
     ) -> mssf_core::Result<()> {
         info!(
             "update_epoch: Epoch: {:?}, previous epoch lsn: {}",
@@ -483,7 +483,7 @@ impl StateProvider for KvStateProvider {
         info!("get_last_committed_sequence_number: {lsn}");
         Ok(lsn)
     }
-    async fn on_data_loss(&self, _: CancellationToken) -> mssf_core::Result<bool> {
+    async fn on_data_loss(&self, _: BoxedCancelToken) -> mssf_core::Result<bool> {
         info!("on_data_loss");
         Ok(false)
     }

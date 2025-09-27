@@ -8,9 +8,10 @@ members = [
 
 [workspace.dependencies]
 mssf-ext = {path = "./crates/libs/mssf-ext"}
-mssf-com = {version = "0.2.0" }
-mssf-core = "0.2.1"
-mssf-pal = "0.2.0"
+mssf-com = {version = "0.4" }
+mssf-core = "0.4"
+mssf-pal = "0.4"
+mssf-util = "0.4"
 windows-bindgen = "0.62"
 windows-link = "0.1"
 windows-targets = "0.53" # TODO: BOOL problem is fixed here: https://github.com/microsoft/windows-rs/pull/3441 need to wait next release.

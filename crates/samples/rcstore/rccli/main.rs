@@ -12,7 +12,7 @@ use mssf_core::{
         svc_mgmt_client::{PartitionKeyType, ServiceEndpointRole},
         FabricClient,
     },
-    WString,
+    types::Uri,
 };
 
 tonic::include_proto!("rcstore_rpc"); // The string specified here must match the proto package name
@@ -74,7 +74,7 @@ async fn main() {
     let svcc = fc.get_service_manager();
     let resolution = svcc
         .resolve_service_partition(
-            &WString::from("fabric:/RcStore/RcStoreService"),
+            &Uri::from("fabric:/RcStore/RcStoreService"),
             &PartitionKeyType::None,
             None,
             Duration::from_secs(1),

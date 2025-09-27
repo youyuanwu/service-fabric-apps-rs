@@ -8,13 +8,8 @@
 extern crate mssf_pal as windows_core;
 
 use mssf_core::WString;
-use mssf_core::{
-    debug::wait_for_debugger,
-    runtime::{
-        executor::{DefaultExecutor, Executor},
-        CodePackageActivationContext,
-    },
-};
+use mssf_core::{debug::wait_for_debugger, runtime::CodePackageActivationContext};
+use mssf_util::tokio::TokioExecutor;
 use sfrc_core::wrap::ReliableCollectionRuntime;
 use tracing::info;
 
@@ -47,7 +42,7 @@ fn main() -> mssf_core::Result<()> {
 
     let rt = tokio::runtime::Runtime::new().unwrap();
 
-    let e = DefaultExecutor::new(rt.handle().clone());
+    let e = TokioExecutor::new(rt.handle().clone());
     let runtime = mssf_core::runtime::Runtime::create(e.clone()).unwrap();
     let actctx = CodePackageActivationContext::create().unwrap();
     let rplctr_endpoint = actctx
@@ -63,8 +58,6 @@ fn main() -> mssf_core::Result<()> {
         .register_stateful_service_factory(&WString::from("RcStoreService"), factory)
         .unwrap();
 
-    e.block_on(async {
-        tokio::signal::ctrl_c().await.expect("fail to get ctrl-c");
-    });
+    e.block_until_ctrlc();
     Ok(())
 }

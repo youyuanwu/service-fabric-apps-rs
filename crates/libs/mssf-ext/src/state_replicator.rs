@@ -1,6 +1,7 @@
 use mssf_com::FabricRuntime::{IFabricOperationData, IFabricStateReplicator2};
 use mssf_core::{
-    sync::{fabric_begin_end_proxy, CancellationToken, FabricReceiver},
+    runtime::executor::BoxedCancelToken,
+    sync::{fabric_begin_end_proxy, FabricReceiver},
     types::ReplicatorSettings,
 };
 
@@ -27,7 +28,7 @@ impl StateReplicator for StateReplicatorProxy {
     fn replicate(
         &self,
         operation_data: impl OperationData,
-        cancellation_token: CancellationToken,
+        cancellation_token: BoxedCancelToken,
     ) -> (i64, FabricReceiver<mssf_core::WinResult<i64>>) {
         // let the begin op to overwrite the
         let mut sequence_number = 0_i64;

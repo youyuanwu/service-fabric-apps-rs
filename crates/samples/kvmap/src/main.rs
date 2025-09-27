@@ -9,14 +9,9 @@ use std::path::PathBuf;
 
 use kvmap::Factory;
 use mssf_core::{
-    debug::wait_for_debugger,
-    runtime::{
-        executor::{DefaultExecutor, Executor},
-        CodePackageActivationContext,
-    },
-    strings::WStringWrap,
-    WString,
+    debug::wait_for_debugger, runtime::CodePackageActivationContext, strings::WStringWrap, WString,
 };
+use mssf_util::tokio::TokioExecutor;
 use tracing::info;
 
 fn has_debug_arg() -> bool {
@@ -32,7 +27,7 @@ fn has_debug_arg() -> bool {
 // ctx info for the app.
 #[derive(Clone)]
 pub struct ProcCtx {
-    rt: DefaultExecutor,
+    rt: TokioExecutor,
     replication_port: u32,
     rpc_port: u32,
     workdir: PathBuf,
@@ -46,7 +41,7 @@ fn main() -> mssf_core::Result<()> {
     }
 
     let rt = tokio::runtime::Runtime::new().unwrap();
-    let e = DefaultExecutor::new(rt.handle().clone());
+    let e = TokioExecutor::new(rt.handle().clone());
     let runtime = mssf_core::runtime::Runtime::create(e.clone()).unwrap();
     let actctx = CodePackageActivationContext::create().unwrap();
     let endpoint = actctx
@@ -68,8 +63,6 @@ fn main() -> mssf_core::Result<()> {
         .register_stateful_service_factory(&WString::from("KvMapService"), factory)
         .unwrap();
 
-    e.block_on(async {
-        tokio::signal::ctrl_c().await.expect("fail to get ctrl-c");
-    });
+    e.block_until_ctrlc();
     Ok(())
 }

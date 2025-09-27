@@ -11,5 +11,6 @@ crate-type = ["dylib"]
 mssf-com.workspace = true
 mssf-core.workspace = true
 mssf-pal.workspace = true
+mssf-util.workspace = true
 tokio.workspace = true
 lazy_static.workspace = true

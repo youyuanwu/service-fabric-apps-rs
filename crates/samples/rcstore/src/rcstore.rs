@@ -4,6 +4,7 @@
 // license information.
 // ------------------------------------------------------------
 
+use mssf_util::tokio::TokioExecutor;
 use std::{
     cell::Cell,
     ffi::c_void,
@@ -13,11 +14,10 @@ use tracing::info;
 
 use mssf_core::{
     runtime::{
-        executor::{DefaultExecutor, Executor},
+        executor::{BoxedCancelToken, Executor},
         stateful::{PrimaryReplicator, StatefulServiceFactory, StatefulServiceReplica},
         stateful_proxy::{PrimaryReplicatorProxy, StatefulServicePartition},
     },
-    sync::CancellationToken,
     types::{OpenMode, ReplicaRole},
     GUID,
 };
@@ -32,11 +32,11 @@ use crate::utils::DataLossHandler;
 pub struct Factory {
     replication_port: u32,
     grpc_port: u32,
-    rt: DefaultExecutor,
+    rt: TokioExecutor,
 }
 
 impl Factory {
-    pub fn create(replication_port: u32, grpc_port: u32, rt: DefaultExecutor) -> Factory {
+    pub fn create(replication_port: u32, grpc_port: u32, rt: TokioExecutor) -> Factory {
         Factory {
             replication_port,
             grpc_port,
@@ -97,14 +97,14 @@ impl Replica {
 
 // The serving of the database.
 pub struct Service {
-    rt: DefaultExecutor,
+    rt: TokioExecutor,
     store: Mutex<Cell<Option<Arc<TxnReplicaReplicator>>>>,
     tx: Mutex<Cell<Option<Sender<()>>>>,
     grpc_port: u32,
 }
 
 impl Service {
-    pub fn new(grpc_port: u32, rt: DefaultExecutor) -> Service {
+    pub fn new(grpc_port: u32, rt: TokioExecutor) -> Service {
         Service {
             rt,
             store: Mutex::new(Cell::new(None)),
@@ -160,7 +160,7 @@ impl StatefulServiceReplica for Replica {
         &self,
         openmode: OpenMode,
         partition: &StatefulServicePartition,
-        _: CancellationToken,
+        _: BoxedCancelToken,
     ) -> mssf_core::Result<impl PrimaryReplicator> {
         // should be primary replicator
         info!("Replica::open {:?}", openmode);
@@ -200,7 +200,7 @@ impl StatefulServiceReplica for Replica {
     async fn change_role(
         &self,
         newrole: ReplicaRole,
-        _: CancellationToken,
+        _: BoxedCancelToken,
     ) -> mssf_core::Result<WString> {
         info!("Replica::change_role {:?}", newrole);
 
@@ -210,7 +210,7 @@ impl StatefulServiceReplica for Replica {
         let addr = WString::from(format!("http://localhost:{}", self.grpc_port));
         Ok(addr)
     }
-    async fn close(&self, _: CancellationToken) -> mssf_core::Result<()> {
+    async fn close(&self, _: BoxedCancelToken) -> mssf_core::Result<()> {
         info!("Replica::close");
         self.svc.stop();
         Ok(())
@@ -457,7 +457,7 @@ pub mod rpc {
                 svc_mgmt_client::{PartitionKeyType, ServiceEndpointRole},
                 FabricClient,
             },
-            WString,
+            types::Uri,
         };
 
         #[tokio::test]
@@ -467,7 +467,7 @@ pub mod rpc {
             let svcc = fc.get_service_manager();
             let resolution = svcc
                 .resolve_service_partition(
-                    &WString::from("fabric:/RcStore/RcStoreService"),
+                    &Uri::from("fabric:/RcStore/RcStoreService"),
                     &PartitionKeyType::None,
                     None,
                     Duration::from_secs(1),

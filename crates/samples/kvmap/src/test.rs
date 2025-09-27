@@ -11,9 +11,9 @@ use mssf_core::{
     types::{
         QueryServiceReplicaStatus, ReplicaRole, RestartReplicaDescription,
         ServiceNotificationFilterDescription, ServiceNotificationFilterFlags,
-        ServicePartitionInformation, ServicePartitionQueryDescription, ServicePartitionQueryResult,
-        ServicePartitionStatus, ServiceReplicaQueryDescription, ServiceReplicaQueryResult,
-        StatefulServiceReplicaQueryResult,
+        ServicePartitionInformation, ServicePartitionQueryDescription,
+        ServicePartitionQueryResultItem, ServicePartitionStatus, ServiceReplicaQueryDescription,
+        ServiceReplicaQueryResultItem, StatefulServiceReplicaQueryResult, Uri,
     },
     ErrorCode, WString, GUID,
 };
@@ -50,7 +50,7 @@ impl KvMapMgmt {
 
     pub async fn register_notification(&self) -> FilterIdHandle {
         let desc = ServiceNotificationFilterDescription {
-            name: WString::from(SVC_URI),
+            name: Uri::from(SVC_URI),
             flags: ServiceNotificationFilterFlags::NamePrefix,
         };
         // register takes more than 1 sec.
@@ -72,7 +72,7 @@ impl KvMapMgmt {
         let resolution = self
             .svc
             .resolve_service_partition(
-                &KV_MAP_SVC_URI,
+                &Uri::from(KV_MAP_SVC_URI.clone()),
                 &PartitionKeyType::None,
                 None,
                 TIMEOUT_LONG,
@@ -114,7 +114,7 @@ impl KvMapMgmt {
 
     pub async fn get_partition(&self) -> mssf_core::Result<(GUID, ServicePartitionStatus)> {
         let desc = ServicePartitionQueryDescription {
-            service_name: KV_MAP_SVC_URI.clone(),
+            service_name: Uri::from(KV_MAP_SVC_URI.clone()),
             partition_id_filter: None,
         };
         let list = self
@@ -124,7 +124,7 @@ impl KvMapMgmt {
         // there is only one partition
         let p = list.iter().next().unwrap();
         let stateful = match p {
-            ServicePartitionQueryResult::Stateful(s) => s,
+            ServicePartitionQueryResultItem::Stateful(s) => s,
             _ => panic!("not stateless"),
         };
         let info = stateful.partition_information;
@@ -168,7 +168,7 @@ impl KvMapMgmt {
         let replicas = replicas
             .iter()
             .map(|x| match x {
-                ServiceReplicaQueryResult::Stateful(s) => s,
+                ServiceReplicaQueryResultItem::Stateful(s) => s,
                 _ => panic!("not stateful"),
             })
             .collect::<Vec<_>>();
