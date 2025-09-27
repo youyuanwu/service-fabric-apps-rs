@@ -255,6 +255,12 @@ dependencies = [
  "mssf-core",
  "mssf-pal",
  "tokio",
+]
+
+[[package]]
+name = "cpp_tools_api"
+version = "0.1.0"
+dependencies = [
  "windows-bindgen",
 ]
 

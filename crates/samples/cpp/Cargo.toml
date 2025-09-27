@@ -3,16 +3,11 @@ name = "cpp"
 version = "0.1.0"
 edition = "2021"
 
-[[bin]]
-name = "cpp_tools_api"
-path = "tools_api/gen.rs"
-
 # compiles to static lib for cpp to link to
 [lib]
 crate-type = ["dylib"]
 
 [dependencies]
-windows-bindgen.workspace = true
 mssf-com.workspace = true
 mssf-core.workspace = true
 mssf-pal.workspace = true
