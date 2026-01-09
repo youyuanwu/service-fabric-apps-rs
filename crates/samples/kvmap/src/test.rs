@@ -81,7 +81,7 @@ impl KvMapMgmt {
             .await
             .unwrap();
         // find endpoints
-        let endpoints = resolution.get_endpoint_list();
+        let endpoints = resolution.endpoints;
 
         // there is only 2 replicas
 
@@ -122,9 +122,9 @@ impl KvMapMgmt {
             .get_partition_list(&desc, TIMEOUT_LONG, None)
             .await?;
         // there is only one partition
-        let p = list.iter().next().unwrap();
+        let p = list.service_partitions.first().unwrap();
         let stateful = match p {
-            ServicePartitionQueryResultItem::Stateful(s) => s,
+            ServicePartitionQueryResultItem::Stateful(s) => s.clone(),
             _ => panic!("not stateless"),
         };
         let info = stateful.partition_information;
@@ -166,9 +166,10 @@ impl KvMapMgmt {
             .await
             .unwrap();
         let replicas = replicas
+            .service_replicas
             .iter()
             .map(|x| match x {
-                ServiceReplicaQueryResultItem::Stateful(s) => s,
+                ServiceReplicaQueryResultItem::Stateful(s) => s.clone(),
                 _ => panic!("not stateful"),
             })
             .collect::<Vec<_>>();

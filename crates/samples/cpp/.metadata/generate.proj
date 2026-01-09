@@ -1,11 +1,11 @@
 <?xml version="1.0" encoding="utf-8"?>
-<Project Sdk="Microsoft.Windows.WinmdGenerator/0.56.13-preview">
+<Project Sdk="Microsoft.Windows.WinmdGenerator/0.63.31-preview">
     <PropertyGroup Label="Globals">
         <OutputWinmd>../.windows/winmd/Microsoft.ServiceFabric.FabricStrings.winmd</OutputWinmd>
         <WinmdVersion>255.255.255.255</WinmdVersion>
         <ExcludeFromCrossarch>true</ExcludeFromCrossarch>
         <ScanArch>x64</ScanArch>
-        <SFIdlDir>$(MSBuildProjectDirectory)\..\..\..\..\build\_deps\fabric_metadata-src\idl</SFIdlDir>
+        <SFIdlDir>$(MSBuildProjectDirectory)\..\..\..\..\build\fabric_metadata-src\idl</SFIdlDir>
         <AdditionalIncludes>$(SFIdlDir)</AdditionalIncludes>
         <!--compiled h headers from idl-->
         <SdkIncRoot>obj\CompiledHeaders</SdkIncRoot>

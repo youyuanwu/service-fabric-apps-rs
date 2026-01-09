@@ -8,19 +8,43 @@ jobs:
         BUILD_TYPE: ["Debug"]
         os: [ windows-latest ]
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v5
 
-    - name: Get MSVC
+    # needed for midl.exe
+    - name: Setup MSVC shell
       uses: ilammy/msvc-dev-cmd@v1
 
-    - name: Get specific version CMake, v3.27.9
-      uses: lukka/get-cmake@v3.27.9
+    - name: Show cmake version
+      run: cmake --version
 
     - name: Install rust stable
       uses: dtolnay/rust-toolchain@stable
       with:
-        toolchain: 1.88.0
+        toolchain: 1.92.0
         components: rustfmt, clippy
+
+    - name: install protoc
+      uses: taiki-e/install-action@protoc
+
+    # winmd generate
+    - name: setup dotnet
+      uses: actions/setup-dotnet@v3
+      with:
+        dotnet-version: 
+          8.0.x
+
+    - name: install ClangSharpPInvokeGenerator
+      run: dotnet tool install --global ClangSharpPInvokeGenerator --version 17.0.1
+
+    - name: restore winmd generator nuget
+      run: dotnet restore .metadata\generate.proj
+
+    # The VS component requirement for winmd generator is needed. It will cause ci failure.
+    # The install of component will likely requires restart machine to work.
+    # We remove all the requirements to work around
+    - name: hack
+      run: echo "" | Out-File -FilePath "C:\Users\runneradmin\.nuget\packages\microsoft.windows.winmdgenerator\0.63.31-preview\scripts\Get-RequiredWorkloads.ps1"
+      shell: pwsh
 
     - name: cmake configure
       run: > 
@@ -36,6 +60,12 @@ jobs:
       if: failure()
       run: Get-Content .metadata\obj\scratch\x64\Microsoft.ServiceFabric.ReliableCollectionRuntime.generation.output.txt
       shell: pwsh
+
+    - name: generate fabric string winmd
+      run: |
+        cmake --build build --config ${{ matrix.BUILD_TYPE }} --target generate_fabric_strings_winmd_clean
+        cmake --build build --config ${{ matrix.BUILD_TYPE }} --target generate_fabric_strings_rust
+
 
     - name: check all generated files are checked in git
       run: git diff --exit-code -- '***.rs'

@@ -18,6 +18,7 @@ mssf-com.workspace = true
 mssf-pal.workspace = true
 mssf-util.workspace = true
 tonic.workspace = true
+tonic-prost.workspace = true
 prost.workspace = true
 clap.workspace = true
 
@@ -29,8 +30,7 @@ path = "../../libs/core"
 path = "../../libs/c"
 
 [build-dependencies]
-tonic-build.workspace = true
-prost-build.workspace = true
+tonic-prost-build.workspace = true
 
 [package.metadata.rust-analyzer]
 cargo.loadOutDirsFromCheck = true

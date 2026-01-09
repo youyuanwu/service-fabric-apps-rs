@@ -8,9 +8,7 @@ mod test;
 use std::path::PathBuf;
 
 use kvmap::Factory;
-use mssf_core::{
-    debug::wait_for_debugger, runtime::CodePackageActivationContext, strings::WStringWrap, WString,
-};
+use mssf_core::{debug::wait_for_debugger, runtime::CodePackageActivationContext, WString};
 use mssf_util::tokio::TokioExecutor;
 use tracing::info;
 
@@ -50,17 +48,17 @@ fn main() -> mssf_core::Result<()> {
     let rpc_endpoint = actctx
         .get_endpoint_resource(&WString::from("KvRpcEndpoint"))
         .unwrap();
-    let work_dir: WStringWrap = unsafe { actctx.get_com().get_WorkDirectory() }.into();
+    let work_dir = actctx.get_code_package_info().work_directory;
     let ctx = ProcCtx {
         rt: e.clone(),
         replication_port: endpoint.port,
         rpc_port: rpc_endpoint.port,
-        workdir: PathBuf::from(WString::from(work_dir).to_string()),
+        workdir: PathBuf::from(work_dir.to_string()),
     };
 
     let factory = Factory::create(ctx);
     runtime
-        .register_stateful_service_factory(&WString::from("KvMapService"), factory)
+        .register_stateful_service_factory(&WString::from("KvMapService"), Box::new(factory))
         .unwrap();
 
     e.block_until_ctrlc();

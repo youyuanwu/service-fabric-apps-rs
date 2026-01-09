@@ -145,12 +145,12 @@ impl TxnReplicaReplicator {
             )
         };
 
-        if ok.is_err() {
+        if let Err(e) = ok {
             // need to send the error back
             let ctx_back = unsafe {
                 Box::from_raw(ctx_raw as *mut Sender<Result<(StateProvider, BOOL), Error>>)
             };
-            ctx_back.send(Err(ok.unwrap_err().into())).unwrap();
+            ctx_back.send(Err(e.into())).unwrap();
         } else if synchronouscomplete.0 != 0 {
             let store = StateProvider { h: stateprovider };
             // ctx is not used by backend

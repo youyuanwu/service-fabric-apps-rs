@@ -10,19 +10,23 @@ jobs:
         BUILD_TYPE: ["Debug"]
         os: [ windows-latest ]
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v5
 
-    - name: Get MSVC
+    # needed for midl.exe
+    - name: Setup MSVC shell
       uses: ilammy/msvc-dev-cmd@v1
 
-    - name: Get specific version CMake, v3.27.9
-      uses: lukka/get-cmake@v3.27.9
+    - name: Show cmake version
+      run: cmake --version
 
     - name: Install rust stable
       uses: dtolnay/rust-toolchain@stable
       with:
-        toolchain: 1.88.0
+        toolchain: 1.92.0
         components: rustfmt, clippy
+
+    - name: install protoc
+      uses: taiki-e/install-action@protoc
 
     - name: run cmake
       run: > 
@@ -78,93 +82,3 @@ jobs:
       run: |
         $ErrorActionPreference = "Stop"
         .\scripts\rccli.ps1 -action List
-
-  # build-linux:
-  #   runs-on: ${{ matrix.os }}
-  #   strategy:
-  #     matrix:
-  #       BUILD_TYPE: ["Debug"]
-  #       os: [ ubuntu-20.04 ]
-  #   steps:
-  #   - uses: actions/checkout@v4
-  #   - name: apt-get
-  #     run: sudo apt-get update && sudo apt-get install apt-transport-https curl lsb-release wget gnupg2 software-properties-common debconf-utils clang lld -y
-
-  #   - name: install sf
-  #     run: |
-  #       wget -q https://packages.microsoft.com/config/ubuntu/$(lsb_release -rs)/packages-microsoft-prod.deb;
-  #       sudo dpkg -i packages-microsoft-prod.deb;
-  #       curl -fsSL https://packages.microsoft.com/keys/msopentech.asc | sudo apt-key add - ;
-  #       curl -fsSL https://download.docker.com/linux/ubuntu/gpg | sudo apt-key add - ;
-  #       sudo add-apt-repository "deb [arch=amd64] https://download.docker.com/linux/ubuntu $(lsb_release -cs) stable" ;
-  #       sudo apt-get update;
-  #       echo "servicefabric servicefabric/accepted-eula-ga select true" | sudo debconf-set-selections ;
-  #       echo "servicefabricsdkcommon servicefabricsdkcommon/accepted-eula-ga select true" | sudo debconf-set-selections ;
-  #       sudo apt-get install servicefabricsdkcommon -y;
-  #       echo "LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/opt/microsoft/servicefabric/bin/Fabric/Fabric.Code" >> $GITHUB_ENV
-
-  #   - name: Get specific version CMake, v3.27.9
-  #     uses: lukka/get-cmake@v3.27.9
-
-  #   - name: Install rust stable
-  #     uses: dtolnay/rust-toolchain@stable
-  #     with:
-  #       toolchain: 1.88.0
-  #       components: rustfmt, clippy
-    
-  #   - name: run cmake
-  #     run: > 
-  #       cmake . -DCMAKE_BUILD_TYPE=${{ matrix.BUILD_TYPE }} -B build
-
-  #   # rust build relies on cmake fetch deps.
-  #   - name: Run cargo check
-  #     run: cargo check
-
-  #   - name: Run cargo fmt
-  #     run: cargo fmt --all -- --check
-    
-  #   - name: Run cargo clippy
-  #     run: cargo clippy --all-targets -- -D warnings   
-
-  #   - name: run build
-  #     run: cmake --build build --config ${{ matrix.BUILD_TYPE }}
-
-  #   - name: install sfctl
-  #     run: |
-  #       pip3 install -I sfctl==11.1.0
-  #       echo "~/.local/bin" >> $GITHUB_PATH
-    
-  #   - name: test sfctl
-  #     run: sfctl --version
-
-  #   - name: start sf
-  #     run: sudo /opt/microsoft/sdk/servicefabric/common/clustersetup/devclustersetup.sh
-
-  #   - name: test cluster health
-  #     run: |
-  #       set +e # do not exit on error
-  #       counter=0
-  #       COMMAND_STATUS=1
-  #       until [ $COMMAND_STATUS -eq 0 ]; do
-  #         echo "attempt #${counter}"
-  #         sfctl cluster select
-  #         COMMAND_STATUS=$?
-  #         sleep 1
-  #         let counter=counter+1
-  #         if [[ $counter -eq 10 ]] ;
-  #         then
-  #           echo "Retry max reached" && exit 1
-  #         fi
-  #       done
-  #       sfctl cluster health
-    
-  #   - name: provision app
-  #     run: |
-  #       sleep 30 # wait for cluster to be up
-  #       bash ./scripts/rcstore_ctl.sh -a add
-  #       sleep 30s
-  #       sfctl service health --service-id RcStore/RcStoreService
-  #       # sfctl service resolve --service-id RcStore/RcStoreService
-    # TODO: cannot resolve in ci
-    # - name: run all unittests
-    #   run: cargo test --all

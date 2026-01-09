@@ -1,19 +1,18 @@
-cmake_minimum_required(VERSION 3.27)
+cmake_minimum_required(VERSION 3.28)
 
 project(sf-reliable-collection-rs LANGUAGES CXX)
 
 if(WIN32)
 message(STATUS "fetching fabric_metadata")
 include(FetchContent)
-FetchContent_Declare(fabric_metadata
+FetchContent_GetProperties(fabric_metadata)
+if(NOT fabric_metadata_POPULATED)
+FetchContent_Populate(fabric_metadata
     GIT_REPOSITORY https://github.com/youyuanwu/service-fabric-metadata-fork.git
     GIT_TAG 552f4e38ad2c772419e52e62207c236fc31ffcbb
 )
-FetchContent_GetProperties(fabric_metadata)
-if(NOT fabric_metadata_POPULATED)
-    FetchContent_Populate(fabric_metadata)
-    # do not add to cmake build since we only need winmd file to generate code.
 endif()
+# do not add to cmake build since we only need winmd file to generate code.
 
 include(${fabric_metadata_SOURCE_DIR}/cmake/ImportFabric.cmake)
 message(STATUS "Fabric Code Root: ${ServiceFabric_Runtime_BINARY_DIR}")

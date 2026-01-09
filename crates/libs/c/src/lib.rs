@@ -15,6 +15,8 @@ pub use ReliableCollectionRuntime::Microsoft::ServiceFabric::ReliableCollectionR
 
 // Special usage for mssf_pal.
 // See mssf_pal documentations for why this is used this way.
+pub use windows_link::link;
+
 use mssf_pal::*;
 extern crate self as windows;
 extern crate self as windows_core;

@@ -1,10 +1,7 @@
 use std::{cell::Cell, sync::Arc};
 
 use mssf_core::{
-    runtime::{
-        executor::BoxedCancelToken,
-        stateful::{PrimaryReplicator, Replicator},
-    },
+    runtime::{executor::BoxedCancelToken, IPrimaryReplicator, IReplicator},
     types::{
         Epoch, ReplicaInformation, ReplicaRole, ReplicaSetConfig, ReplicaSetQuorumMode,
         ReplicatorSettings,
@@ -42,8 +39,8 @@ impl<T: StateProvider> Rplctr<T> {
         )
     }
 }
-
-impl<T: StateProvider> Replicator for Rplctr<T> {
+#[mssf_core::async_trait]
+impl<T: StateProvider> IReplicator for Rplctr<T> {
     async fn open(&self, _: BoxedCancelToken) -> mssf_core::Result<WString> {
         // start rpc server
         let close_token = TokioCancelToken::new_boxed();
@@ -79,14 +76,14 @@ impl<T: StateProvider> Replicator for Rplctr<T> {
     }
     async fn change_role(
         &self,
-        epoch: &Epoch,
-        role: &ReplicaRole,
+        epoch: Epoch,
+        role: ReplicaRole,
         _: BoxedCancelToken,
     ) -> mssf_core::Result<()> {
-        self.inner.change_role(role.clone(), epoch.clone()).await
+        self.inner.change_role(role, epoch).await
     }
     // called only on secondaries.
-    async fn update_epoch(&self, _epoch: &Epoch, _: BoxedCancelToken) -> mssf_core::Result<()> {
+    async fn update_epoch(&self, _epoch: Epoch, _: BoxedCancelToken) -> mssf_core::Result<()> {
         todo!()
     }
     fn get_current_progress(&self) -> mssf_core::Result<i64> {
@@ -100,7 +97,8 @@ impl<T: StateProvider> Replicator for Rplctr<T> {
     }
 }
 
-impl<T: StateProvider> PrimaryReplicator for Rplctr<T> {
+#[mssf_core::async_trait]
+impl<T: StateProvider> IPrimaryReplicator for Rplctr<T> {
     async fn on_data_loss(&self, cancellation_token: BoxedCancelToken) -> mssf_core::Result<u8> {
         self.inner
             .get_state_prov()
@@ -113,8 +111,8 @@ impl<T: StateProvider> PrimaryReplicator for Rplctr<T> {
     }
     fn update_catch_up_replica_set_configuration(
         &self,
-        _currentconfiguration: &ReplicaSetConfig,
-        _previousconfiguration: &ReplicaSetConfig,
+        _currentconfiguration: ReplicaSetConfig,
+        _previousconfiguration: ReplicaSetConfig,
     ) -> mssf_core::Result<()> {
         todo!()
     }
@@ -127,13 +125,13 @@ impl<T: StateProvider> PrimaryReplicator for Rplctr<T> {
     }
     fn update_current_replica_set_configuration(
         &self,
-        _currentconfiguration: &ReplicaSetConfig,
+        _currentconfiguration: ReplicaSetConfig,
     ) -> mssf_core::Result<()> {
         todo!()
     }
     async fn build_replica(
         &self,
-        _replica: &ReplicaInformation,
+        _replica: ReplicaInformation,
         _: BoxedCancelToken,
     ) -> mssf_core::Result<()> {
         todo!()

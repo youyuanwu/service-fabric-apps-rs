@@ -84,7 +84,7 @@ async fn main() {
         .unwrap();
     // find primary
     let endpoint = resolution
-        .get_endpoint_list()
+        .endpoints
         .iter()
         .find(|e| e.role == ServiceEndpointRole::StatefulPrimary)
         .expect("no primary found");

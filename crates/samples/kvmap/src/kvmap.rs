@@ -7,9 +7,8 @@ use mssf_com::{
 };
 use mssf_core::{
     runtime::{
-        executor::BoxedCancelToken,
-        stateful::{PrimaryReplicator, StatefulServiceFactory, StatefulServiceReplica},
-        stateful_proxy::{PrimaryReplicatorProxy, StatefulServicePartition},
+        executor::BoxedCancelToken, stateful_proxy::PrimaryReplicatorProxy, IPrimaryReplicator,
+        IStatefulServiceFactory, IStatefulServicePartition, IStatefulServiceReplica,
     },
     types::{Epoch, OpenMode, ReplicaRole},
     Interface, WString, GUID,
@@ -44,20 +43,20 @@ impl Factory {
     }
 }
 
-impl StatefulServiceFactory for Factory {
+impl IStatefulServiceFactory for Factory {
     fn create_replica(
         &self,
-        servicetypename: &mssf_core::WString,
-        servicename: &mssf_core::WString,
+        servicetypename: mssf_core::WString,
+        servicename: mssf_core::types::Uri,
         initializationdata: &[u8],
-        partitionid: &GUID,
+        partitionid: GUID,
         replicaid: i64,
-    ) -> mssf_core::Result<impl StatefulServiceReplica> {
+    ) -> mssf_core::Result<Box<dyn IStatefulServiceReplica>> {
         info!("create_replica: service_type {servicetypename}, service_name {servicename}, init data len {}, partition id {:?}, replicaid {replicaid}",
           initializationdata.len(),
           partitionid
         );
-        Ok(Replica::create(self.ctx.clone()))
+        Ok(Box::new(Replica::create(self.ctx.clone())))
     }
 }
 
@@ -152,13 +151,13 @@ impl<T: OperationDataStream> OperationDataStream for CopyStateStream<T> {
         } else if lsn > peer_lsn {
             if self.up_to_sequence_number < peer_lsn {
                 // peer has already caught up than the sync point
-                return Ok(None);
+                Ok(None)
             } else {
                 // send data and lsn
                 let p = CopyStatePayload { sn: lsn, data };
-                return Ok(Some(OperationDataBuf::new(Bytes::from(
+                Ok(Some(OperationDataBuf::new(Bytes::from(
                     serde_json::to_string(&p).unwrap(),
-                ))));
+                ))))
             }
         } else {
             panic!("peer is more advanced than primary {lsn}, {peer_lsn}");
@@ -213,14 +212,15 @@ impl Replica {
     }
 }
 
-impl StatefulServiceReplica for Replica {
+#[mssf_core::async_trait]
+impl IStatefulServiceReplica for Replica {
     async fn open(
         &self,
         openmode: OpenMode,
-        partition: &StatefulServicePartition,
+        partition: Arc<dyn IStatefulServicePartition>,
         _: BoxedCancelToken,
-    ) -> mssf_core::Result<impl PrimaryReplicator> {
-        let com = partition.get_com();
+    ) -> mssf_core::Result<Box<dyn IPrimaryReplicator>> {
+        let com = partition.try_get_com().unwrap();
 
         let stateprovider = KvStateProvider::create(self.ctx.rt.clone(), self.state.clone());
         let stateprovider_bridge: IFabricStateProvider =
@@ -296,7 +296,7 @@ impl StatefulServiceReplica for Replica {
         // return the replicator.
         let rplctr = rplctr.unwrap().cast().unwrap();
         let proxy = PrimaryReplicatorProxy::new(rplctr);
-        Ok(proxy)
+        Ok(Box::new(proxy))
     }
 
     async fn change_role(

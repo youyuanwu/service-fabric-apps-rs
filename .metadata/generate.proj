@@ -5,7 +5,7 @@
         <WinmdVersion>255.255.255.255</WinmdVersion>
         <ExcludeFromCrossarch>true</ExcludeFromCrossarch>
         <ScanArch>x64</ScanArch>
-        <AdditionalIncludes>$(MSBuildProjectDirectory)\..\build\_deps\fabric_metadata-src\src\fabric\include</AdditionalIncludes>
+        <AdditionalIncludes>$(MSBuildProjectDirectory)\..\build\fabric_metadata-src\src\fabric\include</AdditionalIncludes>
     </PropertyGroup>
     <ItemGroup>
         <EmitterRsp Include="./emitter.settings.rsp"/>

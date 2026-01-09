@@ -15,10 +15,11 @@ use tracing::info;
 use mssf_core::{
     runtime::{
         executor::{BoxedCancelToken, Executor},
-        stateful::{PrimaryReplicator, StatefulServiceFactory, StatefulServiceReplica},
-        stateful_proxy::{PrimaryReplicatorProxy, StatefulServicePartition},
+        stateful_proxy::PrimaryReplicatorProxy,
+        IPrimaryReplicator, IStatefulServiceFactory, IStatefulServicePartition,
+        IStatefulServiceReplica,
     },
-    types::{OpenMode, ReplicaRole},
+    types::{OpenMode, ReplicaRole, Uri},
     GUID,
 };
 use mssf_core::{Error, WString};
@@ -53,15 +54,15 @@ fn get_addr(port: u32, hostname: WString) -> String {
     addr
 }
 
-impl StatefulServiceFactory for Factory {
+impl IStatefulServiceFactory for Factory {
     fn create_replica(
         &self,
-        servicetypename: &WString,
-        servicename: &WString,
+        servicetypename: WString,
+        servicename: Uri,
         initializationdata: &[u8],
-        partitionid: &GUID,
+        partitionid: GUID,
         replicaid: i64,
-    ) -> Result<impl StatefulServiceReplica, Error> {
+    ) -> Result<Box<dyn IStatefulServiceReplica>, Error> {
         info!(
             "Factory::create_replica type {}, service {}, init data size {}, partid {:?}",
             servicetypename,
@@ -73,7 +74,7 @@ impl StatefulServiceFactory for Factory {
         let svc = Service::new(self.grpc_port, self.rt.clone());
 
         let replica = Replica::new(replicaid, svc, self.replication_port, self.grpc_port);
-        Ok(replica)
+        Ok(Box::new(replica))
     }
 }
 
@@ -155,13 +156,14 @@ impl Service {
     }
 }
 
-impl StatefulServiceReplica for Replica {
+#[mssf_core::async_trait]
+impl IStatefulServiceReplica for Replica {
     async fn open(
         &self,
         openmode: OpenMode,
-        partition: &StatefulServicePartition,
+        partition: Arc<dyn IStatefulServicePartition>,
         _: BoxedCancelToken,
-    ) -> mssf_core::Result<impl PrimaryReplicator> {
+    ) -> mssf_core::Result<Box<dyn IPrimaryReplicator>> {
         // should be primary replicator
         info!("Replica::open {:?}", openmode);
 
@@ -178,7 +180,7 @@ impl StatefulServiceReplica for Replica {
         // create reliable collection.
         let ok = get_txn_replicator(
             self.id,
-            partition.get_com(),
+            partition.try_get_com().unwrap(),
             &dataloss_handler,
             &txn_settings,
             &WString::new(),
@@ -195,7 +197,7 @@ impl StatefulServiceReplica for Replica {
 
         self.svc.set_store(txnp);
 
-        Ok(PrimaryReplicatorProxy::new(p))
+        Ok(Box::new(PrimaryReplicatorProxy::new(p)))
     }
     async fn change_role(
         &self,
@@ -344,10 +346,10 @@ pub mod rpc {
             let req = request.into_inner();
             let store_url = WString::from(req.store_url);
             let sp = self.get_state_provider(&store_url).await;
-            if sp.is_err() {
+            if let Err(e) = &sp {
                 return Err(tonic::Status::internal(format!(
                     "Cannot get state provider {}",
-                    sp.unwrap_err()
+                    e
                 )));
             }
             let sp = sp.unwrap();
@@ -371,10 +373,10 @@ pub mod rpc {
             let req = request.into_inner();
             let store_url = WString::from(req.store_url);
             let sp = self.get_state_provider(&store_url).await;
-            if sp.is_err() {
+            if let Err(e) = &sp {
                 return Err(tonic::Status::internal(format!(
                     "Cannot get state provider {}",
-                    sp.unwrap_err()
+                    e
                 )));
             }
             let sp = sp.unwrap();
@@ -397,10 +399,10 @@ pub mod rpc {
             let req = request.into_inner();
             let store_url = WString::from(req.store_url);
             let sp = self.get_state_provider(&store_url).await;
-            if sp.is_err() {
+            if let Err(e) = &sp {
                 return Err(tonic::Status::internal(format!(
                     "Cannot get state provider {}",
-                    sp.unwrap_err()
+                    e
                 )));
             }
             let sp = sp.unwrap();
@@ -425,10 +427,10 @@ pub mod rpc {
             let req = request.into_inner();
             let store_url = WString::from(req.store_url);
             let sp = self.get_state_provider(&store_url).await;
-            if sp.is_err() {
+            if let Err(e) = &sp {
                 return Err(tonic::Status::internal(format!(
                     "Cannot get state provider {}",
-                    sp.unwrap_err()
+                    e
                 )));
             }
             let sp = sp.unwrap();
@@ -477,7 +479,7 @@ pub mod rpc {
                 .unwrap();
             // find primary
             let endpoint = resolution
-                .get_endpoint_list()
+                .endpoints
                 .iter()
                 .find(|e| e.role == ServiceEndpointRole::StatefulPrimary)
                 .expect("no primary found");

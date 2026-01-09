@@ -55,7 +55,7 @@ fn main() -> mssf_core::Result<()> {
 
     let factory = Factory::create(rplctr_endpoint.port, grpc_endpoint.port, e.clone());
     runtime
-        .register_stateful_service_factory(&WString::from("RcStoreService"), factory)
+        .register_stateful_service_factory(&WString::from("RcStoreService"), Box::new(factory))
         .unwrap();
 
     e.block_until_ctrlc();

@@ -25,7 +25,7 @@ add_custom_target(generate_fabric_strings_winmd_clean
 )
 
 add_custom_target(generate_fabric_strings_rust
-    COMMAND ${cargo_exe} run -p cpp --bin cpp_tools_api
+    COMMAND ${cargo_exe} run -p cpp_tools_api --bin cpp_tools_api
     COMMAND ${cargo_exe} fmt -p cpp # format the generated crate
     WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
     DEPENDS generate_fabric_strings_winmd
