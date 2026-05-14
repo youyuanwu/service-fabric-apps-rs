@@ -317,7 +317,7 @@ impl IStatefulServiceReplica for Replica {
         // include scheme in the svc addr returned to SF.
         let addr_res = WString::from(format!("http://{svc_addr}",));
         // clean up pending stuff
-        let curr_role = self.role.lock().await.get_mut().clone();
+        let curr_role = *self.role.lock().await.get_mut();
         if curr_role == newrole {
             // nothing has changed.
             return Ok(addr_res);
@@ -414,7 +414,7 @@ impl IStatefulServiceReplica for Replica {
                 //     }
                 // })
             }
-            ReplicaRole::Unknown => panic!("Unknonw role"),
+            _ => panic!("Unknonw role {}", newrole as u8),
         }
         Ok(addr_res)
     }

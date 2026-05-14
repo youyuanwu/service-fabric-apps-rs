@@ -1,0 +1,165 @@
+name: ci
+
+on: [push, pull_request]
+
+jobs:
+  setup:
+    runs-on: ubuntu-latest
+    outputs:
+      rust_version: ${{ steps.toolchain.outputs.rust_version }}
+    steps:
+    - uses: actions/checkout@v5
+
+    - name: Read rust toolchain version
+      id: toolchain
+      shell: bash
+      run: |
+        version=$(grep '^channel' rust-toolchain.toml | cut -d'"' -f2)
+        echo "rust_version=$version" >> "$GITHUB_OUTPUT"
+        echo "Detected rust toolchain: $version"
+
+  build:
+    needs: setup
+    runs-on: windows-latest
+    steps:
+    - uses: actions/checkout@v5
+
+    # needed for midl.exe
+    - name: Setup MSVC shell
+      uses: ilammy/msvc-dev-cmd@v1
+
+    - name: Show cmake version
+      run: cmake --version
+
+    - name: Install rust stable
+      uses: dtolnay/rust-toolchain@stable
+      with:
+        toolchain: ${{ needs.setup.outputs.rust_version }}
+        components: rustfmt, clippy
+
+    - name: install protoc
+      uses: taiki-e/install-action@protoc
+
+    - name: run cmake
+      run: > 
+        cmake . -DCMAKE_BUILD_TYPE=Debug -B build
+
+    # rust build relies on cmake fetch deps.
+    - name: Run cargo check
+      run: cargo check
+
+    - name: Run cargo fmt
+      run: cargo fmt --all -- --check
+    
+    - name: Run cargo clippy
+      run: cargo clippy --all-targets -- -D warnings   
+
+    - name: run build
+      run: |
+        cmake --build build --config Debug
+
+    # cpp tests
+    - name: run cmake test
+      run: ctest -C Debug --test-dir build --verbose --repeat until-pass:3 --timeout 30 --output-on-failure
+
+    # mysql bin has conflicting dlls with fabric than prevents fabric from starting
+    - name: Remove conflict dll paths
+      shell: powershell
+      run: |
+        get-command libprotobuf.dll | format-list
+        Remove-Item -Recurse -Force "C:\Program Files\MySQL\MySQL Server 8.0\bin"
+
+    - name: start sf cluster
+      shell: pwsh
+      run: |
+        Powershell.exe -File "C:\Program Files\Microsoft SDKs\Service Fabric\ClusterSetup\DevClusterSetup.ps1"
+        Start-Sleep -Seconds 20
+        Connect-ServiceFabricCluster
+      
+    - name: provision apps
+      run: |
+        Powershell.exe -File scripts/rcstore_ctl.ps1 -Action Add
+        Powershell.exe -File scripts/kvmap_ctl.ps1 -Action Add
+        Start-Sleep -Seconds 30
+      shell: pwsh
+    # todo: may need to sleep to wait for app to be up. but test compilation may take some time.
+
+    - name: run all unittests
+      run: cargo test --all
+      env:
+        RUST_BACKTRACE: '1'
+
+    - name: run rcstore cli
+      shell: pwsh
+      run: |
+        $ErrorActionPreference = "Stop"
+        .\scripts\rccli.ps1 -action List
+
+  generate:
+    needs: setup
+    runs-on: windows-latest
+    steps:
+    - uses: actions/checkout@v5
+
+    # needed for midl.exe
+    - name: Setup MSVC shell
+      uses: ilammy/msvc-dev-cmd@v1
+
+    - name: Show cmake version
+      run: cmake --version
+
+    - name: Install rust stable
+      uses: dtolnay/rust-toolchain@stable
+      with:
+        toolchain: ${{ needs.setup.outputs.rust_version }}
+        components: rustfmt, clippy
+
+    - name: install protoc
+      uses: taiki-e/install-action@protoc
+
+    # winmd generate
+    - name: setup dotnet
+      uses: actions/setup-dotnet@v3
+      with:
+        dotnet-version: 
+          8.0.x
+
+    - name: install ClangSharpPInvokeGenerator
+      run: dotnet tool install --global ClangSharpPInvokeGenerator --version 17.0.1
+
+    - name: restore winmd generator nuget
+      run: dotnet restore .metadata\generate.proj
+
+    # The VS component requirement for winmd generator is needed. It will cause ci failure.
+    # The install of component will likely requires restart machine to work.
+    # We remove all the requirements to work around
+    - name: hack
+      run: echo "" | Out-File -FilePath "C:\Users\runneradmin\.nuget\packages\microsoft.windows.winmdgenerator\0.63.31-preview\scripts\Get-RequiredWorkloads.ps1"
+      shell: pwsh
+
+    - name: cmake configure
+      run: > 
+        cmake . -DCMAKE_BUILD_TYPE=Debug -B build
+
+    - name: remove generated c wrapper code
+      run: cmake --build build --config Debug --target force_clean
+
+    - name: generate rust code
+      run: cmake --build build --config Debug --target generate_rust
+
+    - name: show winmd generator log
+      if: failure()
+      run: Get-Content .metadata\obj\scratch\x64\Microsoft.ServiceFabric.ReliableCollectionRuntime.generation.output.txt
+      shell: pwsh
+
+    - name: generate fabric string winmd
+      run: |
+        cmake --build build --config Debug --target generate_fabric_strings_winmd_clean
+        cmake --build build --config Debug --target generate_fabric_strings_rust
+
+
+    - name: check all generated files are checked in git
+      run: git diff --exit-code -- '***.rs'
+
+    - name: build rust code
+      run: cmake --build build --config Debug

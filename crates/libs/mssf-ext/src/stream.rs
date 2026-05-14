@@ -197,11 +197,11 @@ mod test {
         }
     }
 
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn test_data_stream() {
         // get handle
         let h = tokio::runtime::Handle::current();
-        let rt = TokioExecutor::new(h);
+        let rt: TokioExecutor = TokioExecutor::new(h);
         let mystream = MyOperationDataStream {
             count: Mutex::new(Cell::new(0)),
         };

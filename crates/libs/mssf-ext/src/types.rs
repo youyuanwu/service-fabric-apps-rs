@@ -4,25 +4,25 @@ use mssf_com::FabricTypes::{
     FABRIC_OPERATION_TYPE_END_OF_STREAM, FABRIC_OPERATION_TYPE_HAS_ATOMIC_GROUP_MASK,
     FABRIC_OPERATION_TYPE_INVALID, FABRIC_OPERATION_TYPE_NORMAL,
     FABRIC_OPERATION_TYPE_ROLLBACK_ATOMIC_GROUP, FABRIC_SERVICE_KIND, FABRIC_SERVICE_KIND_STATEFUL,
-    FABRIC_SERVICE_KIND_STATELESS, FABRIC_SERVICE_QUERY_DESCRIPTION, FABRIC_URI,
+    FABRIC_SERVICE_KIND_STATELESS, FABRIC_SERVICE_QUERY_DESCRIPTION,
 };
-use mssf_core::WString;
+use mssf_core::types::Uri;
 
 pub struct ServiceQueryDescription {
-    pub application_name: WString,           // in url format
-    pub servicename_filter: Option<WString>, // in url format
+    pub application_name: Uri,           // in url format
+    pub servicename_filter: Option<Uri>, // in url format
 }
 
 impl ServiceQueryDescription {
     // raw type has lifetime the same as self
     pub fn get_raw(&self) -> FABRIC_SERVICE_QUERY_DESCRIPTION {
         FABRIC_SERVICE_QUERY_DESCRIPTION {
-            ApplicationName: FABRIC_URI(self.application_name.as_ptr() as *mut u16),
-            ServiceNameFilter: if self.servicename_filter.is_none() {
-                FABRIC_URI(std::ptr::null_mut())
-            } else {
-                FABRIC_URI(self.servicename_filter.as_ref().unwrap().as_ptr() as *mut u16)
-            },
+            ApplicationName: self.application_name.as_raw(),
+            ServiceNameFilter: self
+                .servicename_filter
+                .as_ref()
+                .unwrap_or(&Uri::default())
+                .as_raw(),
             Reserved: std::ptr::null_mut(),
         }
     }

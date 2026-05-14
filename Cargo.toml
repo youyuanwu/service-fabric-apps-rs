@@ -8,10 +8,10 @@ members = [
 
 [workspace.dependencies]
 mssf-ext = { path = "./crates/libs/mssf-ext"}
-mssf-com = { version = "0.5" }
-mssf-core = "0.6"
+mssf-com = { version = "0.6" }
+mssf-core = "0.7"
 mssf-pal = "0.5"
-mssf-util = "0.6"
+mssf-util = "0.7"
 windows-bindgen = "0.66"
 windows-link = "0.2"
 tracing = { version = "0.1", features = ["log"] }
