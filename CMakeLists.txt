@@ -70,6 +70,7 @@ add_custom_target(generate_rust
 )
 
 add_custom_target(force_clean
+  COMMAND ${dotnet_exe} dotnet clean .metadata
   COMMAND ${CMAKE_COMMAND} -E rm -rf crates/libs/c/src/Microsoft
   COMMAND ${CMAKE_COMMAND} -E rm -rf .windows
   COMMAND ${CMAKE_COMMAND} -E rm -rf build/ReliableCollectionRuntime.lib
@@ -83,3 +84,7 @@ add_custom_target(build_rust ALL
 
 enable_testing()
 add_subdirectory(crates/samples)
+
+if(WIN32)
+  add_dependencies(generate_rust generate_fabric_strings_winmd)
+endif()

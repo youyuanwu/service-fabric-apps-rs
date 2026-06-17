@@ -95,7 +95,7 @@ pub trait StateReplicator {
         &self,
         operation_data: impl OperationData,
         cancellation_token: BoxedCancelToken,
-    ) -> (i64, FabricReceiver<mssf_core::WinResult<i64>>);
+    ) -> (i64, FabricReceiver<mssf_core::Result<i64>>);
 
     /// Gets replication stream.
     /// Returns:

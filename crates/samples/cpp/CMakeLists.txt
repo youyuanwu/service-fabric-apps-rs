@@ -19,9 +19,9 @@ add_custom_target(generate_fabric_strings_winmd
 )
 
 add_custom_target(generate_fabric_strings_winmd_clean
-  # COMMAND ${CMAKE_COMMAND} -E rm -f ${winmd_file}
-  COMMAND ${dotnet_exe} clean
-  WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/.metadata
+  COMMAND ${CMAKE_COMMAND} -E rm -rf ${CMAKE_CURRENT_SOURCE_DIR}/.metadata/obj
+  COMMAND ${CMAKE_COMMAND} -E rm -rf ${CMAKE_CURRENT_SOURCE_DIR}/.metadata/bin
+  WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
 )
 
 add_custom_target(generate_fabric_strings_rust

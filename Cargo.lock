@@ -615,9 +615,9 @@ dependencies = [
 
 [[package]]
 name = "mssf-core"
-version = "0.7.0"
+version = "0.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "10057bd19deaae2bf301a4b970d2523fc916110b205ae56eea4ed38d642eaccf"
+checksum = "4f571f7e28a330e980024bedd7361c8e4b38a92dba29353cfb0e4b40178d82f0"
 dependencies = [
  "async-trait",
  "bitflags",
@@ -672,9 +672,9 @@ dependencies = [
 
 [[package]]
 name = "mssf-util"
-version = "0.7.0"
+version = "0.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e2ae70c2ff174463994d8adc25e0ae27099dcb86b4a4a71df7c58ad325d3d39a"
+checksum = "10df0980a1ad04978b9c775c97b0caa1015535e2da90ad5213835e4ee921989c"
 dependencies = [
  "mssf-com",
  "mssf-core",

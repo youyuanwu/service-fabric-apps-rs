@@ -29,7 +29,7 @@ impl StateReplicator for StateReplicatorProxy {
         &self,
         operation_data: impl OperationData,
         cancellation_token: BoxedCancelToken,
-    ) -> (i64, FabricReceiver<mssf_core::WinResult<i64>>) {
+    ) -> (i64, FabricReceiver<mssf_core::Result<i64>>) {
         // let the begin op to overwrite the
         let mut sequence_number = 0_i64;
         let ptr = std::ptr::addr_of_mut!(sequence_number);

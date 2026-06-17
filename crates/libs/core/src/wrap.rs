@@ -88,7 +88,7 @@ impl TxnReplicaReplicator {
             unsafe { Box::from_raw(ctx as *mut Sender<Result<(StateProvider, BOOL), Error>>) };
 
         let err = Error::from(status);
-        if err.0 != HRESULT::default() {
+        if err.code() != HRESULT::default() {
             // failed
             let ok = ctx_back.send(Err(err));
             debug_assert!(ok.is_ok(), "frontend dropped");

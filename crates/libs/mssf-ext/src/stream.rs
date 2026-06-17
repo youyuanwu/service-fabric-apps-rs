@@ -101,12 +101,12 @@ impl OperationDataStream for OperationDataStreamProxy {
                 Ok(Some(proxy))
             }
             Err(e) => {
-                if e == mssf_core::WinError::empty() {
+                if e == mssf_core::WinError::empty().into() {
                     // special case of end of stream.
                     // nullptr is returned and windows-rs gives an empty error.
                     Ok(None)
                 } else {
-                    Err(e.into())
+                    Err(e)
                 }
             }
         }
@@ -142,12 +142,12 @@ impl OperationStream for OperationStreamProxy {
                 Ok(Some(proxy))
             }
             Err(e) => {
-                if e == mssf_core::WinError::empty() {
+                if e == mssf_core::WinError::empty().into() {
                     // special case of end of stream.
                     // nullptr is returned and windows-rs gives an empty error.
                     Ok(None)
                 } else {
-                    Err(e.into())
+                    Err(e)
                 }
             }
         }
