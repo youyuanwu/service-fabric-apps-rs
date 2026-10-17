@@ -99,15 +99,11 @@ impl<T: StateProvider> IReplicator for Rplctr<T> {
 
 #[mssf_core::async_trait]
 impl<T: StateProvider> IPrimaryReplicator for Rplctr<T> {
-    async fn on_data_loss(&self, cancellation_token: BoxedCancelToken) -> mssf_core::Result<u8> {
+    async fn on_data_loss(&self, cancellation_token: BoxedCancelToken) -> mssf_core::Result<bool> {
         self.inner
             .get_state_prov()
             .on_data_loss(cancellation_token)
             .await
-            .map(|c| match c {
-                true => 1,
-                false => 0,
-            })
     }
     fn update_catch_up_replica_set_configuration(
         &self,

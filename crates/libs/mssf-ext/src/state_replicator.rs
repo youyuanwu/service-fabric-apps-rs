@@ -1,4 +1,5 @@
 use mssf_com::FabricRuntime::{IFabricOperationData, IFabricStateReplicator2};
+use mssf_com::FabricTypes::FABRIC_SEQUENCE_NUMBER;
 use mssf_core::{
     runtime::executor::BoxedCancelToken,
     sync::{fabric_begin_end_proxy, FabricReceiver},
@@ -31,17 +32,17 @@ impl StateReplicator for StateReplicatorProxy {
         cancellation_token: BoxedCancelToken,
     ) -> (i64, FabricReceiver<mssf_core::Result<i64>>) {
         // let the begin op to overwrite the
-        let mut sequence_number = 0_i64;
+        let mut sequence_number = FABRIC_SEQUENCE_NUMBER::default();
         let ptr = std::ptr::addr_of_mut!(sequence_number);
         let data_bridge: IFabricOperationData = OperationDataBridge::new(operation_data).into();
         let com1 = &self.com_impl;
         let com2 = self.com_impl.clone();
         let rx = fabric_begin_end_proxy(
             move |callback| unsafe { com1.BeginReplicate(&data_bridge, callback, ptr) },
-            move |ctx| unsafe { com2.EndReplicate(ctx) },
+            move |ctx| unsafe { com2.EndReplicate(ctx) }.map(|number| number.0),
             Some(cancellation_token),
         );
-        (sequence_number, rx)
+        (sequence_number.0, rx)
     }
     fn get_replication_stream(&self) -> mssf_core::Result<impl OperationStream> {
         let s = unsafe { self.com_impl.GetReplicationStream() }?;
@@ -55,7 +56,9 @@ impl StateReplicator for StateReplicatorProxy {
     }
     fn update_replicator_settings(&self, settings: &ReplicatorSettings) -> mssf_core::Result<()> {
         let raw = settings.get_raw();
-        unsafe { self.com_impl.UpdateReplicatorSettings(&raw) }.map_err(mssf_core::Error::from)
+        unsafe { self.com_impl.UpdateReplicatorSettings(&raw) }
+            .ok()
+            .map_err(mssf_core::Error::from)
     }
     fn get_replicator_settings(&self) -> mssf_core::Result<ReplicatorSettings> {
         let raw = unsafe { self.com_impl.GetReplicatorSettings() }?;
