@@ -1,7 +1,6 @@
 [workspace]
 resolver = "2"
 members = [
-  "crates/tools/*",
   "crates/libs/*",
   "crates/samples/*"
 ]
@@ -12,8 +11,6 @@ mssf-com = { version = "0.6" }
 mssf-core = "0.8"
 mssf-pal = "0.5"
 mssf-util = "0.8"
-windows-bindgen = "0.66"
-windows-link = "0.2"
 tracing = { version = "0.1", features = ["log"] }
 tracing-subscriber = { version = "0.3",  default-features = false, features = ["fmt"]}
 trait-variant = "0.1"
@@ -27,7 +24,6 @@ tonic = "0.14"
 prost = "0.14"
 tonic-prost = "0.14"
 tonic-prost-build = "0.14"
-clap = { version = "4", features = ["derive"] }
 
 # testing code not released in crates yet
 # [patch.crates-io]
