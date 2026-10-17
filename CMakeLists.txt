@@ -64,7 +64,6 @@ find_program (
 
 add_custom_target(generate_rust
   COMMAND ${cargo_exe} run -p tools_api
-  COMMAND ${cargo_exe} run -p cpp_tools_api
   WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
   DEPENDS generate_winmd
 )
@@ -82,9 +81,4 @@ add_custom_target(build_rust ALL
     WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
 )
 
-enable_testing()
 add_subdirectory(crates/samples)
-
-if(WIN32)
-  add_dependencies(generate_rust generate_fabric_strings_winmd)
-endif()
