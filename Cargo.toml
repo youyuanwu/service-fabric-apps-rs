@@ -7,10 +7,10 @@ members = [
 
 [workspace.dependencies]
 mssf-ext = { path = "./crates/libs/mssf-ext"}
-mssf-com = { version = "0.6" }
-mssf-core = "0.8"
-mssf-pal = "0.5"
-mssf-util = "0.8"
+mssf-com = { version = "0.10" }
+mssf-core = "0.10"
+mssf-pal = "0.10"
+mssf-util = "0.10"
 tracing = { version = "0.1", features = ["log"] }
 tracing-subscriber = { version = "0.3",  default-features = false, features = ["fmt"]}
 trait-variant = "0.1"
@@ -24,9 +24,3 @@ tonic = "0.14"
 prost = "0.14"
 tonic-prost = "0.14"
 tonic-prost-build = "0.14"
-
-# testing code not released in crates yet
-# [patch.crates-io]
-# mssf-core = {git = "https://github.com/youyuanwu/service-fabric-rs-fork.git", rev = "f664423fd9f1818cbd400aa34617e73d49fb7ff6"}
-# mssf-com = {git = "https://github.com/youyuanwu/service-fabric-rs-fork.git", rev = "f664423fd9f1818cbd400aa34617e73d49fb7ff6"}
-# mssf-pal = {git = "https://github.com/youyuanwu/service-fabric-rs-fork.git", rev = "f664423fd9f1818cbd400aa34617e73d49fb7ff6"}

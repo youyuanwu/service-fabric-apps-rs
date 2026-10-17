@@ -9,6 +9,9 @@ Various service fabric rust apps.
 # Build
 Install Rust (using the toolchain pinned in `rust-toolchain.toml`), CMake 3.28 or newer, and Protocol Buffers (`protoc`).
 
+Service Fabric dependencies use the published `mssf` 0.10 release family.
+Tokio-based Service Fabric executors require a multi-threaded Tokio runtime.
+
 ```ps1
 cmake . -B build
 cmake --build build

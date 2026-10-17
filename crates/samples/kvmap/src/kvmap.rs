@@ -3,7 +3,7 @@ use std::{cell::Cell, sync::Arc};
 use bytes::{Buf, Bytes};
 use mssf_com::{
     FabricRuntime::IFabricStateProvider,
-    FabricTypes::{FABRIC_REPLICATOR_ADDRESS, FABRIC_REPLICATOR_SETTINGS},
+    FabricTypes::{FABRIC_REPLICATOR_SETTINGS, FABRIC_REPLICATOR_SETTINGS_FLAGS},
 };
 use mssf_core::{
     runtime::{
@@ -231,7 +231,7 @@ impl IStatefulServiceReplica for Replica {
         {
             let addr = WString::from(format!("{}:{}", "localhost", self.ctx.replication_port));
             let settings = FABRIC_REPLICATOR_SETTINGS {
-                Flags: FABRIC_REPLICATOR_ADDRESS.0 as u32,
+                Flags: FABRIC_REPLICATOR_SETTINGS_FLAGS::FABRIC_REPLICATOR_ADDRESS.0 as u32,
                 ReplicatorAddress: mssf_core::PCWSTR(addr.as_ptr()),
                 ..Default::default()
             };
