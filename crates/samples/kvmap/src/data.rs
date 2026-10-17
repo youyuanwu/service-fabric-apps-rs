@@ -37,7 +37,7 @@ impl OperationDataStream for CountingOperationDataStream {
             return Ok(None);
         }
 
-        let buf = Bytes::from(format!("{}:{}", &self.data, c.get()));
+        let buf = Bytes::from(format!("{}:{}", self.data, c.get()));
         *c.get_mut() += 1;
         Ok(Some(OperationDataBuf::new(buf)))
     }
