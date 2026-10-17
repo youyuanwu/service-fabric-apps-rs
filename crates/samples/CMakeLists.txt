@@ -1,2 +1,1 @@
 add_subdirectory(kvmap)
-add_subdirectory(rcstore)
