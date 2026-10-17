@@ -209,25 +209,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "cpp"
-version = "0.1.0"
-dependencies = [
- "lazy_static",
- "mssf-com",
- "mssf-core",
- "mssf-pal",
- "mssf-util",
- "tokio",
-]
-
-[[package]]
-name = "cpp_tools_api"
-version = "0.1.0"
-dependencies = [
- "windows-bindgen",
-]
-
-[[package]]
 name = "either"
 version = "1.16.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"

@@ -58,10 +58,6 @@ jobs:
       run: |
         cmake --build build --config Debug
 
-    # cpp tests
-    - name: run cmake test
-      run: ctest -C Debug --test-dir build --verbose --repeat until-pass:3 --timeout 30 --output-on-failure
-
     # mysql bin has conflicting dlls with fabric than prevents fabric from starting
     - name: Remove conflict dll paths
       shell: powershell
@@ -144,12 +140,6 @@ jobs:
       if: failure()
       run: Get-Content .metadata\obj\scratch\x64\Microsoft.ServiceFabric.ReliableCollectionRuntime.generation.output.txt
       shell: pwsh
-
-    - name: generate fabric string winmd
-      run: |
-        cmake --build build --config Debug --target generate_fabric_strings_winmd_clean
-        cmake --build build --config Debug --target generate_fabric_strings_rust
-
 
     - name: check all generated files are checked in git
       run: git diff --exit-code -- '***.rs'
