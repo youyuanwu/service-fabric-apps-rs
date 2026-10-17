@@ -6,42 +6,27 @@ on:
   pull_request:
 
 jobs:
-  setup:
-    runs-on: ubuntu-latest
-    outputs:
-      rust_version: ${{ steps.toolchain.outputs.rust_version }}
-    steps:
-    - uses: actions/checkout@v6
-
-    - name: Read rust toolchain version
-      id: toolchain
-      shell: bash
-      run: |
-        version=$(grep '^channel' rust-toolchain.toml | cut -d'"' -f2)
-        echo "rust_version=$version" >> "$GITHUB_OUTPUT"
-        echo "Detected rust toolchain: $version"
-
   build:
-    needs: setup
     runs-on: windows-latest
     steps:
     - uses: actions/checkout@v6
 
-    - name: Show cmake version
-      run: cmake --version
+    - name: Install just
+      uses: taiki-e/install-action@just
 
-    - name: Install rust stable
-      uses: dtolnay/rust-toolchain@stable
+    - uses: actions/setup-python@v6
       with:
-        toolchain: ${{ needs.setup.outputs.rust_version }}
+        python-version: "3.x"
+
+    - name: Install Rust toolchain with cache
+      uses: actions-rust-lang/setup-rust-toolchain@v1
+      with:
         components: rustfmt, clippy
+        cache: true
+        rustflags: ""
 
     - name: install protoc
       uses: taiki-e/install-action@protoc
-
-    - name: run cmake
-      run: > 
-        cmake . -DCMAKE_BUILD_TYPE=Debug -B build
 
     - name: Run cargo check
       run: cargo check
@@ -52,9 +37,11 @@ jobs:
     - name: Run cargo clippy
       run: cargo clippy --all-targets -- -D warnings   
 
+    - name: Test packaging
+      run: python -m unittest discover -s scripts -p "test_*.py"
+
     - name: run build
-      run: |
-        cmake --build build --config Debug
+      run: just build
 
     # mysql bin has conflicting dlls with fabric than prevents fabric from starting
     - name: Remove conflict dll paths
