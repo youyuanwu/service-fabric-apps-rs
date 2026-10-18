@@ -7,3 +7,9 @@ build-rust:
 
 package:
     python "{{join(justfile_directory(), 'scripts', 'package_kvmap.py')}}"
+
+cluster-build:
+    docker build --tag sf-apps-node:11.8.121.4 "{{join(justfile_directory(), 'docker', 'linux-cluster')}}"
+
+cluster +args:
+    python3 "{{join(justfile_directory(), 'scripts', 'linux_cluster_ctl.py')}}" {{args}}
