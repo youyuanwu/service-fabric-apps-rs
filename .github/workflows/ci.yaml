@@ -68,3 +68,79 @@ jobs:
       run: cargo test --all
       env:
         RUST_BACKTRACE: '1'
+
+  linux-cluster:
+    name: Linux cluster lifecycle
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    permissions:
+      contents: read
+    env:
+      CLUSTER_NAME: ci-${{ github.run_id }}-${{ github.run_attempt }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+    - uses: actions/checkout@v6
+      with:
+        persist-credentials: false
+
+    - uses: actions/setup-python@v6
+      with:
+        python-version: "3.12"
+
+    - name: Check runner prerequisites
+      run: |
+        docker info
+        docker compose version
+        ip -j -4 route
+        free -h
+        df -h /
+
+    - name: Test Linux cluster harness
+      run: python3 -m unittest discover -s scripts -p "test_linux*.py"
+
+    - name: Build pinned node image
+      run: docker build --tag sf-apps-node:11.8.121.4 docker/linux-cluster
+
+    - name: Create three-seed cluster and native baseline
+      run: python3 scripts/linux_cluster_ctl.py create "$CLUSTER_NAME" --subnet 172.30.90.0/24
+
+    - name: Check fresh cluster health
+      run: python3 scripts/linux_cluster_ctl.py status "$CLUSTER_NAME" > "$RUNNER_TEMP/linux-cluster-status-created.json"
+
+    - name: Remove containers while retaining node data
+      run: python3 scripts/linux_cluster_ctl.py down "$CLUSTER_NAME"
+
+    - name: Resume retained cluster
+      run: python3 scripts/linux_cluster_ctl.py up "$CLUSTER_NAME"
+
+    - name: Check resumed cluster health
+      run: python3 scripts/linux_cluster_ctl.py status "$CLUSTER_NAME" > "$RUNNER_TEMP/linux-cluster-status-resumed.json"
+
+    - name: Capture credential-safe diagnostics
+      if: always()
+      timeout-minutes: 2
+      run: |
+        python3 scripts/linux_cluster_diagnostics.py "$CLUSTER_NAME" \
+          --output "$RUNNER_TEMP/linux-cluster-diagnostics/diagnostics.json"
+
+    - name: Upload lifecycle diagnostics
+      if: always()
+      timeout-minutes: 2
+      uses: actions/upload-artifact@v4
+      with:
+        name: linux-cluster-${{ github.run_id }}-${{ github.run_attempt }}
+        path: ${{ runner.temp }}/linux-cluster-diagnostics/diagnostics.json
+        if-no-files-found: error
+        retention-days: 7
+
+    - name: Destroy only this job's cluster
+      if: always()
+      timeout-minutes: 4
+      run: |
+        if [[ -f "build/linux-clusters/$CLUSTER_NAME/state.json" ]]; then
+          python3 scripts/linux_cluster_ctl.py destroy "$CLUSTER_NAME" --confirm "$CLUSTER_NAME"
+        else
+          echo "No cluster allocation record; no cluster resources were allocated."
+        fi

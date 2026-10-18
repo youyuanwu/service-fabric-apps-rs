@@ -1,4 +1,4 @@
-use std::{cell::Cell, sync::Arc};
+use std::{cell::Cell, net::SocketAddr, sync::Arc};
 
 use bytes::{Buf, Bytes};
 use mssf_com::{
@@ -29,8 +29,8 @@ use tonic::transport::Server;
 use tracing::{error, info};
 
 use crate::{
-    app::KvApp, data::VecOperationDataStream, rpc::kvmap_service_server::KvmapServiceServer,
-    ProcCtx,
+    app::KvApp, data::VecOperationDataStream, endpoint_address,
+    rpc::kvmap_service_server::KvmapServiceServer, ProcCtx,
 };
 
 pub struct Factory {
@@ -192,17 +192,16 @@ impl Replica {
         rt: TokioExecutor,
         sr: StateReplicatorProxy,
         app: Arc<KvApp>,
-        svc_addr: String,
+        svc_addr: SocketAddr,
         token: BoxedCancelToken,
     ) {
         // start rpc server
         rt.get_ref().spawn(async move {
             info!("start grpc server on addr: {}", svc_addr);
             let svc = crate::rpc::KvMapRpc::new(app, sr);
-            let addr = svc_addr.parse().unwrap();
             Server::builder()
                 .add_service(KvmapServiceServer::new(svc))
-                .serve_with_shutdown(addr, async {
+                .serve_with_shutdown(svc_addr, async {
                     token.wait().await;
                     println!("Graceful shutdown tonic complete")
                 })
@@ -229,7 +228,10 @@ impl IStatefulServiceReplica for Replica {
         let mut rplctr;
         let state_rplctr;
         {
-            let addr = WString::from(format!("{}:{}", "localhost", self.ctx.replication_port));
+            let addr = WString::from(endpoint_address(
+                &self.ctx.node_address,
+                self.ctx.replication_port,
+            ));
             let settings = FABRIC_REPLICATOR_SETTINGS {
                 Flags: FABRIC_REPLICATOR_SETTINGS_FLAGS::FABRIC_REPLICATOR_ADDRESS.0 as u32,
                 ReplicatorAddress: mssf_core::PCWSTR(addr.as_ptr()),
@@ -291,8 +293,17 @@ impl IStatefulServiceReplica for Replica {
         }
         // start rpc server
         let app = self.state.app.clone();
-        let svc_addr = format!("[::1]:{}", self.ctx.rpc_port);
-        Self::start_rpc(self.ctx.rt.clone(), sr, app, svc_addr, new_svc_token);
+        let svc_addr = endpoint_address(&self.ctx.node_address, self.ctx.rpc_port);
+        let listen_addr = tokio::net::lookup_host(svc_addr.as_str())
+            .await?
+            .next()
+            .ok_or_else(|| {
+                std::io::Error::new(
+                    std::io::ErrorKind::AddrNotAvailable,
+                    format!("RPC endpoint resolved to no addresses: {svc_addr}"),
+                )
+            })?;
+        Self::start_rpc(self.ctx.rt.clone(), sr, app, listen_addr, new_svc_token);
         // return the replicator.
         let rplctr = rplctr.unwrap().cast().unwrap();
         let proxy = PrimaryReplicatorProxy::new(rplctr);
@@ -312,8 +323,7 @@ impl IStatefulServiceReplica for Replica {
             .get_mut()
             .clone()
             .unwrap();
-        let rpc_port = self.ctx.rpc_port;
-        let svc_addr = format!("[::1]:{rpc_port}",);
+        let svc_addr = endpoint_address(&self.ctx.node_address, self.ctx.rpc_port);
         // include scheme in the svc addr returned to SF.
         let addr_res = WString::from(format!("http://{svc_addr}",));
         // clean up pending stuff
