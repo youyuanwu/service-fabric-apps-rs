@@ -19,6 +19,7 @@ from linux_cluster import check_subnet, generate
 
 REPO = Path(__file__).resolve().parents[1]
 STATE_ROOT = REPO / "build/linux-clusters"
+DEFAULT_SUBNET = "172.30.90.0/24"
 OWNER_LABEL = "io.github.service-fabric-apps.cluster-owner"
 IMAGE_LABEL = "io.github.service-fabric-apps.linux-cluster"
 RUNTIME = "11.8.121.4"
@@ -144,6 +145,9 @@ def definition(state, directory):
     for service in compose["services"].values():
         service["labels"] = label
         service["pull_policy"] = "never"
+    # Older allocations retain their frozen, unpublished gateway configuration.
+    if state.get("publish_gateway", False):
+        compose["services"]["n0"]["ports"] = ["127.0.0.1:19080:19080"]
     tools = compose["services"]["tools"]
     tools["profiles"] = ["admin"]
     tools["environment"] = {"HOME": "/tmp/sfctl-home"}
@@ -186,6 +190,7 @@ class Cluster:
         if not isinstance(state, dict) or state.get("schema") != 1 or state.get("name") != self.name \
                 or state.get("project") != self.project \
                 or state.get("phase") not in PHASES \
+                or not isinstance(state.get("publish_gateway", False), bool) \
                 or not re.fullmatch(r"[0-9a-f]{32}", state.get("owner", "")):
             raise ValueError("Invalid cluster identity/state")
         if state["phase"] == "destroyed":
@@ -330,7 +335,7 @@ class Cluster:
             "schema": 1, "name": self.name, "project": self.project,
             "owner": uuid.uuid4().hex, "image": image_id, "subnet": str(check_subnet(subnet, [])),
             "runtime_version": RUNTIME, "manifest_version": "1", "phase": "allocating",
-            "baseline": "not-started",
+            "baseline": "not-started", "publish_gateway": True,
         }
         _, nodes = definition(self.state, self.directory)
         self.state["nodes"] = nodes
@@ -568,7 +573,8 @@ def main():
         if command in ("create", "up"):
             action.add_argument("--timeout", type=positive_timeout, default=900)
         if command == "create":
-            action.add_argument("--subnet", required=True)
+            action.add_argument("--subnet", default=DEFAULT_SUBNET,
+                                help="Private IPv4 subnet (default: %(default)s)")
             action.add_argument("--image", default="sf-apps-node:11.8.121.4")
         if command == "up":
             action.add_argument("--restart-node", choices=NODES, action="append", default=[])
