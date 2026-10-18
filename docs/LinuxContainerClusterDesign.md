@@ -144,7 +144,7 @@ IPv4 is the validated runtime configuration.
 | Lease | 19001 | Between nodes. |
 | Federation/cluster connection | 19002 | Between nodes and seeds. |
 | Service connection | 19006 | Runtime/service traffic. |
-| HTTP gateway | 19080 | Cluster bridge; no host-published mapping. |
+| HTTP gateway | 19080 | Cluster bridge; new lifecycle allocations also publish n0 at host `127.0.0.1:19080`. |
 | Dynamic application endpoints | 22001-23000 | Directly routable between nodes and clients on the bridge. |
 | Native smoke HTTP endpoint | 8080 | Explicit service port outside the dynamic application range. |
 | Replicator/file-transfer endpoints | Runtime/manifest-derived | Use actual allocated endpoints; the table is not an exhaustive listener inventory. |
@@ -153,6 +153,12 @@ The same ports can be used in separate container network namespaces. Do not
 advertise `localhost`, wildcard addresses, or host-translated ports as remote
 service identities. The fork's [socat forwarding][fork-forwarder] of management
 ports is not a routing solution for arbitrary replica/service endpoints.
+
+New lifecycle allocations freeze `publish_gateway: true` in state and publish
+only n0's HTTP gateway, allowing host/WSL localhost access to Service Fabric
+Explorer without a relay. Port 19080 must be free on the host. Existing
+allocations without this field retain their original unpublished configuration;
+resumption does not rewrite their frozen Compose inputs.
 
 The controller rejects private subnets that overlap host routes or Docker
 networks. Node containers have separate PID/network namespaces and must not
@@ -254,7 +260,7 @@ or reconcile manually changed topology/configuration.
 
 | Command | Contract |
 | --- | --- |
-| `create NAME --subnet CIDR` | Verify/freeze the local node image; allocate fresh identities/secrets and external volumes; start all seeds; establish the native baseline; wait for SF readiness. Reject existing allocations/resources rather than adopt them. |
+| `create NAME [--subnet CIDR]` | Default to subnet `172.30.90.0/24`, rejecting host-route/Docker-network overlaps. Verify/freeze the local node image; allocate fresh identities/secrets and external volumes; start all seeds; establish the native baseline; wait for SF readiness. Reject existing allocations/resources rather than adopt them. |
 | `up NAME` | Reuse image/IP/volumes and current node deployment. Resume an observed accepted baseline instead of submitting it twice. Wait for real readiness; no implicit data reset or node restart. |
 | `status NAME` | Report Docker and live SF observations. Do not start nodes. Exit 0 only for a healthy cluster, 1 for stopped/unhealthy/conflicting state. Tools may be started temporarily for SF queries. |
 | `down NAME` | Stop/remove containers and bridge; preserve all node volumes and generated configuration. Record node exit codes and report non-clean shutdown even after resource removal. |

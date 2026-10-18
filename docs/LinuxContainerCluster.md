@@ -17,16 +17,30 @@ Docker context: host routes and generated bind paths are local to this checkout.
 
 ```sh
 docker build -t sf-apps-node:11.8.121.4 docker/linux-cluster
-python3 scripts/linux_cluster_ctl.py create dev --subnet 172.30.90.0/24
+python3 scripts/linux_cluster_ctl.py create dev
 # Equivalently: just cluster-build
-#               just cluster create dev --subnet 172.30.90.0/24
+#               just cluster create dev
 ```
 
-Choose an unused private IPv4 subnet with at least 16 addresses; existing host
-routes and Docker networks must not overlap it. The tools address is subnet
-offset 10; n0, n1, and n2 use offsets 11-13. There are no host-published ports.
-Cluster gateways listen at each node's address on port 19080; clients on the
-host or attached to the bridge can use these directly.
+The default subnet is `172.30.90.0/24`. Override it with `--subnet CIDR` when
+creating another cluster or if it overlaps an existing host route or Docker
+network; overlaps are rejected, not automatically reassigned. Choose an unused
+private IPv4 subnet with at least 16 addresses. The tools address is subnet
+offset 10; n0, n1, and n2 use offsets 11-13. Cluster gateways listen at each
+node's address on port 19080; clients on the host or attached to the bridge can
+use these directly.
+
+New clusters also publish **only n0's HTTP gateway** at `127.0.0.1:19080`.
+Open <http://localhost:19080/Explorer/index.html> on the host, or from Windows
+when Docker runs inside WSL with localhost forwarding enabled. No separate
+`socat` relay is needed. Containers retain their private bridge networking;
+native-client and application ports are not published. Keep the mapping
+loopback-only because the cluster is unsecured.
+
+Host port 19080 must be free; stop another cluster or relay using that port
+before starting a new cluster. Existing allocations retain their original
+unpublished gateway configuration, including after `down`/`up`; do not edit
+their frozen `compose.json` to add a mapping.
 
 The image build is self-contained: no sibling repository, experimental `.paw`
 files, or cached private base image is needed. The Ubuntu image digest, SF
@@ -59,7 +73,7 @@ python3 scripts/linux_cluster_ctl.py destroy dev --confirm dev
 
 | Command | Behavior |
 | --- | --- |
-| `create NAME --subnet CIDR [--image IMAGE]` | Fresh three-seed allocation and native baseline. Rejects existing state/resources rather than adopting them. |
+| `create NAME [--subnet CIDR] [--image IMAGE]` | Fresh three-seed allocation and native baseline. Defaults to subnet `172.30.90.0/24`. Rejects existing state/resources rather than adopting them. |
 | `up NAME` | Recreate/start using the same volumes, identities, image ID, and deployment; wait for actual SF readiness. Resume an observed accepted baseline without submitting it twice. |
 | `status NAME` | JSON Docker and live SF observations. Does not start nodes. Exits 0 only when healthy; exits 1 for stopped/unhealthy/missing/conflicting resources. |
 | `down NAME` | Remove this project's containers and bridge, **preserving all node volumes and generated configuration**. |

@@ -1,6 +1,7 @@
 import copy
 from contextlib import nullcontext
 import importlib.util
+import io
 import json
 from pathlib import Path
 import subprocess
@@ -23,6 +24,23 @@ probe = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(probe)
 
 
+class CommandLineTests(unittest.TestCase):
+    def test_create_default_subnet_and_explicit_override(self):
+        for arguments, expected in (
+            ([], "172.30.90.0/24"),
+            (["--subnet", "172.29.99.0/24"], "172.29.99.0/24"),
+        ):
+            with self.subTest(arguments=arguments), tempfile.TemporaryDirectory() as temporary:
+                with patch.object(sys, "argv", [
+                    "linux_cluster_ctl.py", "--state-root", temporary, "create", "test",
+                    *arguments,
+                ]), patch.object(sys, "stdout", new_callable=io.StringIO), \
+                        patch.object(ctl.os, "umask"), patch.object(ctl, "check_local_docker"), \
+                        patch.object(ctl.Cluster, "create", return_value={"ready": True}) as create:
+                    self.assertEqual(ctl.main(), 0)
+                create.assert_called_once_with(expected, "sf-apps-node:11.8.121.4", 900)
+
+
 class LifecycleTests(unittest.TestCase):
     def setUp(self):
         temporary = tempfile.TemporaryDirectory()
@@ -35,7 +53,7 @@ class LifecycleTests(unittest.TestCase):
             "schema": 1, "name": "test", "project": "sf-linux-test", "owner": "a" * 32,
             "image": "sha256:" + "b" * 64, "subnet": "172.29.99.0/24",
             "runtime_version": ctl.RUNTIME, "manifest_version": "1",
-            "phase": "ready", "baseline": "complete",
+            "phase": "ready", "baseline": "complete", "publish_gateway": True,
         }
         compose, nodes = ctl.definition(self.cluster.state, self.directory)
         self.cluster.state["nodes"] = nodes
@@ -55,11 +73,32 @@ class LifecycleTests(unittest.TestCase):
             self.assertEqual(service["image"], self.cluster.state["image"])
             self.assertEqual(service["labels"], {ctl.OWNER_LABEL: "a" * 32})
             self.assertNotIn("profiles", service)
-            self.assertNotIn("ports", service)
+            self.assertNotIn("network_mode", service)
+            if node["node_name"] == "n0":
+                self.assertEqual(service["ports"], ["127.0.0.1:19080:19080"])
+            else:
+                self.assertNotIn("ports", service)
         tools = compose["services"]["tools"]
         self.assertEqual(tools["profiles"], ["admin"])
+        self.assertNotIn("ports", tools)
         self.assertEqual(tools["environment"]["HOME"], "/tmp/sfctl-home")
         self.assertTrue(tools["volumes"][0]["read_only"])
+
+    def test_legacy_allocation_retains_unpublished_gateway(self):
+        del self.cluster.state["publish_gateway"]
+        compose, _ = ctl.definition(self.cluster.state, self.directory)
+        self.assertTrue(all("ports" not in service for service in compose["services"].values()))
+        ctl.write_json(self.directory / "compose.json", compose)
+        self.cluster.save()
+        self.cluster.load()
+        self.assertNotIn("publish_gateway", self.cluster.state)
+
+    def test_edited_gateway_binding_rejected(self):
+        compose = json.loads((self.directory / "compose.json").read_text())
+        compose["services"]["n0"]["ports"] = ["0.0.0.0:19080:19080"]
+        ctl.write_json(self.directory / "compose.json", compose)
+        with self.assertRaisesRegex(ValueError, "inputs changed"):
+            self.cluster.load()
 
     def test_private_atomic_state_and_frozen_inputs(self):
         self.cluster.load()
@@ -97,6 +136,17 @@ class LifecycleTests(unittest.TestCase):
         with patch.object(ctl, "run", side_effect=["", ""]):
             with self.assertRaisesRegex(ValueError, "Missing retained volume"):
                 self.cluster.resources()
+
+    def test_default_subnet_rejects_route_and_docker_network_collisions(self):
+        self.cluster.state["subnet"] = ctl.DEFAULT_SUBNET
+        network = {"Name": "other", "IPAM": {"Config": [{"Subnet": ctl.DEFAULT_SUBNET}]}}
+        for responses in (
+            [json.dumps([{"dst": ctl.DEFAULT_SUBNET}]), ""],
+            ["[]", "network-id", json.dumps([network])],
+        ):
+            with self.subTest(responses=responses), patch.object(ctl, "run", side_effect=responses):
+                with self.assertRaisesRegex(ValueError, "overlaps"):
+                    self.cluster.subnet_check()
 
     def test_foreign_volume_rejected(self):
         volume = self.cluster.state["nodes"][0]["volume_name"]
@@ -180,6 +230,9 @@ class LifecycleTests(unittest.TestCase):
         self.assertNotEqual(self.cluster.state["owner"], original["owner"])
         self.assertNotEqual(self.cluster.state["manifest_sha256"], original["manifest_sha256"])
         self.assertEqual(self.cluster.state["baseline"], "not-started")
+        self.assertIs(self.cluster.state["publish_gateway"], True)
+        compose = json.loads((self.directory / "compose.json").read_text())
+        self.assertEqual(compose["services"]["n0"]["ports"], ["127.0.0.1:19080:19080"])
 
     def test_interrupted_destroy_is_resumable_after_one_volume_removed(self):
         volumes = [{"Name": node["volume_name"]} for node in self.cluster.state["nodes"]]
