@@ -2,6 +2,12 @@
 
 **Status:** proposed; all implementation phases are pending.
 
+An initial [clear-TCP Rust POC](../RustFabricClient.md) now demonstrates native
+gateway ping and NameExists against Ubuntu onebox runtime 11.8.121.4. It is a
+deliberately narrower implementation with a sequential mutable client,
+restricted naming inputs, and no TLS or automatic recovery. The production
+phases below remain pending; partial POC work does not satisfy their full gates.
+
 ## 1. Overview
 
 Implement the native FabricClient gateway protocol in Rust, using Tokio for TCP

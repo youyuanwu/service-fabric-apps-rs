@@ -6,6 +6,38 @@ on:
   pull_request:
 
 jobs:
+  rust-native-client:
+    name: Native-free Rust client
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+    - uses: actions/checkout@v7
+      with:
+        persist-credentials: false
+
+    - name: Install Rust toolchain with cache
+      uses: actions-rust-lang/setup-rust-toolchain@v2
+      with:
+        components: rustfmt, clippy
+        cache: true
+        rustflags: ""
+
+    - name: Check formatting
+      run: cargo fmt --all -- --check
+
+    - name: Test isolated native-free packages
+      run: cargo test --locked -p mssf-transport -p mssf-client
+
+    - name: Lint native-free packages
+      run: cargo clippy --locked -p mssf-transport -p mssf-client --all-targets -- -D warnings
+
+    - name: Build API documentation
+      run: cargo doc --locked -p mssf-transport -p mssf-client --no-deps
+      env:
+        RUSTDOCFLAGS: -D warnings
+
   build:
     runs-on: windows-latest
     steps:
@@ -128,6 +160,78 @@ jobs:
 
     - name: Check fresh cluster health
       run: python3 "$CLUSTER_CTL" status "$CLUSTER_NAME" > "$RUNNER_TEMP/linux-cluster-status-created.json"
+
+    - name: Install Rust for native onebox interoperability
+      if: matrix.topology == 'onebox'
+      uses: actions-rust-lang/setup-rust-toolchain@v2
+      with:
+        cache: true
+        rustflags: ""
+
+    - name: Independently prepare native client fixtures
+      if: matrix.topology == 'onebox'
+      run: |
+        python3 - <<'PY'
+        import json
+        import os
+        from pathlib import Path
+        from urllib.error import HTTPError
+        from urllib.request import ProxyHandler, Request, build_opener
+
+        opener = build_opener(ProxyHandler({}))
+        base = "http://127.0.0.1:19080"
+        existing = "fabric:/native-client-ci-existing"
+        absent = "fabric:/native-client-ci-absent"
+        request = Request(
+            base + "/Names/$/Create?api-version=6.0",
+            data=json.dumps({"Name": existing}).encode(),
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        with opener.open(request, timeout=30) as response:
+            response.read()
+        with opener.open(base + "/Names/native-client-ci-existing?api-version=6.0", timeout=30):
+            pass
+        try:
+            opener.open(base + "/Names/native-client-ci-absent?api-version=6.0", timeout=30)
+        except HTTPError as error:
+            if error.code != 404:
+                raise
+        else:
+            raise RuntimeError("absent fixture unexpectedly exists")
+        with opener.open(base + "/Nodes?api-version=6.0", timeout=30) as response:
+            nodes = json.load(response)["Items"]
+        node = next(node for node in nodes if node["Name"] == "N0010")
+        config = {
+            "profile": "clear",
+            "gateway": "127.0.0.1:19000",
+            "runtime_version": node["CodeVersion"],
+            "existing_name": existing,
+            "absent_name": absent,
+            "expected_node_name": node["Name"],
+            "expected_node_id": node["Id"]["Id"],
+            "expected_node_instance": int(node["InstanceId"]),
+            "report_path": str(Path(os.environ["RUNNER_TEMP"]) / "native-client-report.json"),
+        }
+        path = Path(os.environ["RUNNER_TEMP"]) / "native-client-config.json"
+        path.write_text(json.dumps(config), encoding="utf-8")
+        with open(os.environ["GITHUB_ENV"], "a", encoding="utf-8") as output:
+            output.write(f"MSSF_TEST_CONFIG={path}\n")
+        PY
+
+    - name: Exercise real native ping and NameExists
+      id: native_client
+      if: matrix.topology == 'onebox'
+      run: cargo test --locked -p mssf-client --test onebox_clear -- --ignored
+
+    - name: Upload successful native client evidence
+      if: matrix.topology == 'onebox' && steps.native_client.outcome == 'success'
+      uses: actions/upload-artifact@v4
+      with:
+        name: native-client-${{ github.run_id }}-${{ github.run_attempt }}
+        path: ${{ runner.temp }}/native-client-report.json
+        if-no-files-found: error
+        retention-days: 7
 
     - name: Create retained naming-store fixture
       run: |
