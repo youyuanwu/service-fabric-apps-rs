@@ -1,0 +1,29 @@
+{
+  "origin": "source-derived",
+  "native_source_revision": "3988b4518236d2d0a37f4d8bdcdf0a2093c5a61d",
+  "specification": "docs/transport/FabricClientMessageFormat.md",
+  "profile": "little-endian; eight-byte ObjectHeader; short WCHAR; clear TCP",
+  "fixtures": {
+    "ping-source-derived.hex": {
+      "schema": "PingRequest; protocol 1.1; empty body; CRC8 enabled; CRC32 absent",
+      "guid": "00112233-4455-6677-8899-aabbccddeeff",
+      "message_index": 2,
+      "activity_index": 0,
+      "timeout_ticks": 300000000,
+      "object_padding": "zero"
+    },
+    "message.rs::source_derived_uri_fields": {
+      "schema": "Parsed Uri ten-field object; no additional NamingUri wrapper",
+      "input": "fabric:/app/service",
+      "type": 1,
+      "host_type": 0,
+      "port": -1
+    },
+    "message.rs::source_derived_listen_control": {
+      "schema": "ListenInstance; empty address; instance 0; zero nonce; CRC8 enabled",
+      "guid": "00112233-4455-6677-8899-aabbccddeeff",
+      "message_index": 1
+    }
+  },
+  "normalization": "Constructed directly from documented native schemas with deterministic GUIDs and zero object padding. Not captured native output and not regenerated from Rust encoder output."
+}
