@@ -320,9 +320,11 @@ class LifecycleTests(unittest.TestCase):
                 patch.object(self.cluster, "compose") as compose, \
                 patch.object(self.cluster, "tools", return_value=nullcontext()), \
                 patch.object(self.cluster, "wait") as wait, \
-                patch.object(self.cluster, "establish_baseline"):
+                patch.object(self.cluster, "establish_baseline") as baseline:
             result = self.cluster.up(900, ["n2"])
         self.assertTrue(result["ready"])
+        baseline.assert_called_once_with()
+        self.assertEqual(self.cluster.state["baseline"], "complete")
         retain.assert_called_once()
         allocate.assert_not_called()
         self.assertEqual(helper.call_count, 3)
@@ -333,6 +335,11 @@ class LifecycleTests(unittest.TestCase):
         self.assertEqual(compose.call_args_list[1].args, ("restart", "--timeout", "45", "n2"))
         self.assertEqual(wait.call_args_list[0].args, (False,))
         self.assertEqual(wait.call_args_list[1].args, (True,))
+
+    def test_default_probe_still_requires_the_multi_container_baseline(self):
+        with patch.object(self.cluster, "exec", return_value='{"ready":true}') as execute:
+            self.cluster.probe()
+        self.assertIs(json.loads(execute.call_args.kwargs["data"])["baseline_required"], True)
 
     def test_wait_requires_full_stability_window_and_resets_after_unhealthy_observation(self):
         observations = [{"ready": ready, "problems": [], "gateways": {}}

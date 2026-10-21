@@ -45,8 +45,8 @@ def docker(*arguments):
     ).stdout
 
 
-def collect(name, state_root=STATE_ROOT):
-    project = validate_name(name)
+def collect(name, state_root=STATE_ROOT, *, project_prefix="sf-linux-"):
+    project = validate_name(name, project_prefix)
     report = {"name": name, "project": project, "errors": []}
     directory = state_root / name
     for filename, key in (("state.json", "allocation"), ("last-status.json", "observation")):
@@ -86,8 +86,14 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("name")
     parser.add_argument("--output", required=True, type=Path)
+    parser.add_argument("--onebox", action="store_true", help="Collect a single-container Ubuntu onebox")
     arguments = parser.parse_args()
-    report = collect(arguments.name)
+    if arguments.onebox:
+        from onebox_ctl import Onebox, STATE_ROOT as ONEBOX_STATE_ROOT
+
+        report = collect(arguments.name, ONEBOX_STATE_ROOT, project_prefix=Onebox.project_prefix)
+    else:
+        report = collect(arguments.name)
     arguments.output.parent.mkdir(parents=True, exist_ok=True)
     arguments.output.write_text(json.dumps(report, indent=2) + "\n")
     for error in report["errors"]:

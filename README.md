@@ -27,6 +27,7 @@ an existing debug build. Packaging uses only the Python standard library.
 ```
 
 # Documentation
+* [Ubuntu single-container onebox](docs/UbuntuOnebox.md) - five local nodes in one container, with retained lifecycle and localhost HTTP/native client gateways.
 * [Linux container-cluster lifecycle](docs/LinuxContainerCluster.md) - build, create, resume, inspect, stop, and explicitly destroy a local three-node cluster.
 * [Joining an existing Windows Service Fabric cluster](docs/WindowsClusterJoin.md) - standalone PowerShell workflow, source trace, security, and operational caveats.
 * [Linux multi-container cluster design](docs/LinuxContainerClusterDesign.md) - one node per Docker container, Windows orchestration adaptation, and dynamic-join validation gates.

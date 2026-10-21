@@ -26,10 +26,15 @@ IDENTITY_FIELDS = (
     "runtime_version",
     "volume_name",
 )
+ONEBOX_NODES = ("N0010", "N0020", "N0030", "N0040", "N0050")
 
 
 def expected_identity(environ):
     identity = {name: environ["SF_" + name.upper()] for name in IDENTITY_FIELDS}
+    if "SF_LAYOUT" in environ:
+        if environ["SF_LAYOUT"] != "onebox":
+            raise ValueError("Unsupported deployment layout")
+        identity["layout"] = "onebox"
     if any(not value for value in identity.values()):
         raise ValueError("Node identity fields must not be empty")
     if not identity["node_name"].isascii() or not identity["node_name"].isalnum():
@@ -45,16 +50,29 @@ def validate_manifest(path, identity):
     if manifest.get("Name") != identity["cluster_id"]:
         raise ValueError("Manifest cluster identity does not match the node")
     infrastructure = manifest.find("sf:Infrastructure/sf:Linux", NAMESPACE)
-    if infrastructure is None or infrastructure.get("IsScaleMin", "false") not in ("false", "0"):
-        raise ValueError("Expected Linux IsScaleMin=false")
+    onebox = identity.get("layout") == "onebox"
+    scale_min = infrastructure.get("IsScaleMin", "false") if infrastructure is not None else None
+    if scale_min not in (("true", "1") if onebox else ("false", "0")):
+        raise ValueError(f"Expected Linux IsScaleMin={'true' if onebox else 'false'}")
     nodes = infrastructure.findall("sf:NodeList/sf:Node", NAMESPACE)
     matches = [node for node in nodes if node.get("IPAddressOrFQDN") == identity["node_ip"]]
-    if len(matches) != 1 or matches[0].get("NodeName") != identity["node_name"]:
+    wanted = set(ONEBOX_NODES) if onebox else {identity["node_name"]}
+    if len(matches) != len(wanted) or {node.get("NodeName") for node in matches} != wanted:
         raise ValueError("Manifest must match exactly the assigned local node")
     names = [node.get("NodeName") for node in nodes]
     addresses = [node.get("IPAddressOrFQDN") for node in nodes]
-    if len(set(names)) != len(names) or len(set(addresses)) != len(addresses):
+    if len(set(names)) != len(names) or (not onebox and len(set(addresses)) != len(addresses)):
         raise ValueError("Duplicate manifest node name or address")
+    if onebox:
+        if len(nodes) != len(wanted) or len({node.get("NodeTypeRef") for node in nodes}) != len(wanted):
+            raise ValueError("Onebox requires five local nodes with distinct node types")
+        ports = [
+            endpoint.get("Port")
+            for endpoint in manifest.findall("sf:NodeTypes/sf:NodeType/sf:Endpoints/*", NAMESPACE)
+            if endpoint.get("Port") is not None
+        ]
+        if len(ports) != len(set(ports)):
+            raise ValueError("Onebox node endpoints must use distinct ports")
     return manifest
 
 
@@ -132,11 +150,13 @@ def prepare_platform(root):
 
 
 def validate_deployment(root, identity):
-    packages = list((root / "Data").glob("*/Fabric/Fabric.Package.current.xml"))
-    expected = root / "Data" / identity["node_name"] / "Fabric" / "Fabric.Package.current.xml"
-    if packages != [expected]:
+    packages = set((root / "Data").glob("*/Fabric/Fabric.Package.current.xml"))
+    names = ONEBOX_NODES if identity.get("layout") == "onebox" else (identity["node_name"],)
+    expected = {root / "Data" / name / "Fabric" / "Fabric.Package.current.xml" for name in names}
+    if packages != expected:
         raise ValueError("Deployment must contain exactly the assigned local node")
-    validate_manifest(expected.with_name("ClusterManifest.current.xml"), identity)
+    for package in expected:
+        validate_manifest(package.with_name("ClusterManifest.current.xml"), identity)
 
 
 def own_fresh_deployment(data, account):

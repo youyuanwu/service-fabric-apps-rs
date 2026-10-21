@@ -7,6 +7,11 @@ Docker bridge, and three independent named data volumes. An administrative
 `tools` container exists only while a controller command needs cluster access;
 it is not an SF node. No SSH daemon is required.
 
+For five nodes sharing one Ubuntu container and a published native-client port,
+use the [single-container onebox](UbuntuOnebox.md). Its `just onebox` commands
+mirror this lifecycle; both default profiles use host HTTP port 19080 and cannot
+run concurrently.
+
 ## Build and create
 
 Use a Linux x86-64 host with Python 3.10+, `ip` from iproute2, Docker Engine, and
@@ -146,11 +151,13 @@ CLI release. The dynamic-join proof and full architecture are recorded in
 
 ## Continuous integration
 
-The `Linux cluster lifecycle` job in `.github/workflows/ci.yaml` runs separately
+The `Linux cluster lifecycle` matrix entry in `.github/workflows/ci.yaml` runs separately
 from the Windows build on every pull request and push to `main`. It uses an
 Ubuntu 24.04 x86-64 VM directly, builds the pinned Ubuntu 22.04 node image, and
-checks fresh creation/native baseline, health, retained-data down/up, and resumed
-health. The job has a 45-minute deadline and a unique cluster name per run/attempt.
+checks fresh creation/native baseline, health, retained-data down/up, resumed
+health, and a surviving synthetic naming-store entry. The onebox entry runs
+independently on another runner. Each entry has a
+45-minute deadline and a unique cluster name per run/attempt.
 It does not run joins or application fault tests.
 
 Diagnostics and exact-name confirmed destruction are attempted with `always()`,

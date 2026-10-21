@@ -14,6 +14,30 @@ PARTITIONS = {
     "ImageStore": "00000000-0000-0000-0000-000000003000",
     "Naming": "00000000-0000-0000-0000-000000001000",
 }
+NAMESPACE = {"sf": "http://schemas.microsoft.com/2011/01/fabric"}
+
+
+def expected_members(xml):
+    manifest = ET.fromstring(xml)
+    types = {
+        node_type.get("Name"): node_type
+        for node_type in manifest.findall("sf:NodeTypes/sf:NodeType", NAMESPACE)
+    }
+    members = {}
+    for node in manifest.findall("sf:Infrastructure/sf:Linux/sf:NodeList/sf:Node", NAMESPACE):
+        node_type = types[node.get("NodeTypeRef")]
+        port = node_type.find("sf:Endpoints/sf:HttpGatewayEndpoint", NAMESPACE).get("Port")
+        members[node.get("NodeName")] = {
+            "node_ip": node.get("IPAddressOrFQDN"),
+            "gateway": node.get("IPAddressOrFQDN") + (":" + port if port != "19080" else ""),
+            "node_type": node.get("NodeTypeRef"),
+            "seed": node.get("IsSeedNode", "false") in ("true", "1"),
+            "upgrade_domain": node.get("UpgradeDomain", ""),
+            "fault_domain": node.get("FaultDomain", ""),
+        }
+    if not members:
+        raise ValueError("Manifest contains no Linux nodes")
+    return members
 
 
 def semantic_manifest(xml):
@@ -35,7 +59,8 @@ def get(address, path, deadline):
     remaining = deadline - time.monotonic()
     if remaining <= 0:
         raise TimeoutError("Probe deadline exceeded")
-    request = urllib.request.Request(f"http://{address}:19080{path}?api-version=6.0")
+    authority = address if ":" in address else address + ":19080"
+    request = urllib.request.Request(f"http://{authority}{path}?api-version=6.0")
     # Development bridge traffic must not go through a host's HTTP proxy.
     opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
     with opener.open(request, timeout=min(3, remaining)) as response:
@@ -76,17 +101,15 @@ def baseline_state(upgrade, runtime, config):
 
 def snapshot(spec, expected_xml, baseline_required=True, budget=45):
     deadline = time.monotonic() + budget
-    nodes = spec["nodes"]
-    expected = {node["node_name"]: node for node in nodes}
+    expected = expected_members(expected_xml)
     result = {"gateways": {}, "replicas": {}, "problems": []}
     problems = result["problems"]
     canonical = semantic_manifest(expected_xml)
-    for local in nodes:
-        name = local["node_name"]
+    for name, local in expected.items():
         gateway = {}
         result["gateways"][name] = gateway
         try:
-            address = local["node_ip"]
+            address = local["gateway"]
             gateway["nodes"] = get(address, "/Nodes", deadline)
             gateway["health"] = get(address, "/$/GetClusterHealth", deadline)
             gateway["upgrade"] = get(address, "/$/GetUpgradeProgress", deadline)
@@ -109,10 +132,10 @@ def snapshot(spec, expected_xml, baseline_required=True, budget=45):
                     member.get("IpAddressOrFQDN") != wanted["node_ip"],
                     member.get("CodeVersion") != spec["runtime_version"],
                     member.get("ConfigVersion") != spec["manifest_version"],
-                    member.get("IsSeedNode") is not True,
-                    member.get("Type") != "LinuxNodeType",
-                    member.get("UpgradeDomain") != f"UD{member['Name'][1:]}",
-                    member.get("FaultDomain") != f"fd:/host0/c{member['Name'][1:]}",
+                    member.get("IsSeedNode") is not wanted["seed"],
+                    member.get("Type") != wanted["node_type"],
+                    member.get("UpgradeDomain", "") != wanted["upgrade_domain"],
+                    member.get("FaultDomain", "") != wanted["fault_domain"],
                     member.get("NodeDeactivationInfo", {}).get("NodeDeactivationStatus") != "None",
                 )):
                     problems.append(f"{name}: node {member['Name']} is not Up/enabled/Ok at target")
@@ -126,20 +149,29 @@ def snapshot(spec, expected_xml, baseline_required=True, budget=45):
         except (OSError, ValueError, ET.ParseError) as error:
             gateway["error"] = str(error)
             problems.append(f"{name}: {error}")
+    primary_gateway = next(iter(expected.values()))["gateway"]
     for name, partition in PARTITIONS.items():
         try:
-            replicas = get(nodes[0]["node_ip"], f"/Partitions/{partition}/$/GetReplicas", deadline)
+            replicas = get(primary_gateway, f"/Partitions/{partition}/$/GetReplicas", deadline)
             result["replicas"][name] = replicas
             members = items(replicas)
-            if len(members) != 3 or {replica.get("NodeName") for replica in members} != set(expected) \
-                    or any(replica.get("ReplicaStatus") != "Ready" or replica.get("HealthState") != "Ok"
-                           for replica in members) \
-                    or sum(replica.get("ReplicaRole") == "Primary" for replica in members) != 1:
+            replica_nodes = {replica.get("NodeName") for replica in members}
+            active = [replica for replica in members
+                      if replica.get("ReplicaRole") in ("Primary", "ActiveSecondary")]
+            # Five-node recovery can retain healthy standby replicas outside the active set.
+            if len(active) != 3 or len(replica_nodes) != len(members) \
+                    or not replica_nodes.issubset(expected) \
+                    or any(replica.get("ReplicaStatus") != "Ready" for replica in active) \
+                    or any(replica.get("HealthState") != "Ok" for replica in members) \
+                    or any(replica.get("ReplicaRole") != "IdleSecondary"
+                           or replica.get("ReplicaStatus") != "Standby"
+                           for replica in members if replica not in active) \
+                    or sum(replica.get("ReplicaRole") == "Primary" for replica in active) != 1:
                 problems.append(f"{name}: expected three Ready replicas and one primary")
         except (OSError, ValueError) as error:
             problems.append(f"{name}: {error}")
     try:
-        applications = get(nodes[0]["node_ip"], "/Applications", deadline)
+        applications = get(primary_gateway, "/Applications", deadline)
         result["applications"] = applications
         if any(app.get("Status") != "Ready" or app.get("HealthState") != "Ok"
                for app in items(applications)):
