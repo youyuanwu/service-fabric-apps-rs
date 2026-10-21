@@ -96,10 +96,10 @@ def write_json(path, value):
     write(path, json.dumps(value, indent=2) + "\n")
 
 
-def validate_name(name):
+def validate_name(name, prefix="sf-linux-"):
     if not re.fullmatch(r"[a-z][a-z0-9-]{0,39}", name):
         raise ValueError("Cluster name must be 1-40 lowercase letters/digits/hyphens, starting with a letter")
-    return "sf-linux-" + name
+    return prefix + name
 
 
 def check_local_docker():
@@ -132,9 +132,9 @@ def locked(root, name):
         yield directory
 
 
-def definition(state, directory):
+def definition(state, directory, generator=generate, gateway_service="n0"):
     # Use the recorded XML; never regenerate file-store secrets during recovery.
-    compose, inventory, _ = generate(
+    compose, inventory, _ = generator(
         state["project"], state["subnet"], state["image"], state["image"],
         directory / "ClusterManifest.xml",
     )
@@ -147,22 +147,31 @@ def definition(state, directory):
         service["pull_policy"] = "never"
     # Older allocations retain their frozen, unpublished gateway configuration.
     if state.get("publish_gateway", False):
-        compose["services"]["n0"]["ports"] = ["127.0.0.1:19080:19080"]
-    tools = compose["services"]["tools"]
-    tools["profiles"] = ["admin"]
-    tools["environment"] = {"HOME": "/tmp/sfctl-home"}
-    tools["volumes"] = [{
-        "type": "bind", "source": str(directory / "ClusterManifest.xml"),
-        "target": "/run/sf-bootstrap/ClusterManifest.xml", "read_only": True,
-    }]
+        compose["services"][gateway_service]["ports"] = ["127.0.0.1:19080:19080"]
+    if "tools" in compose["services"]:
+        tools = compose["services"]["tools"]
+        tools["profiles"] = ["admin"]
+        tools["environment"] = {"HOME": "/tmp/sfctl-home"}
+        tools["volumes"] = [{
+            "type": "bind", "source": str(directory / "ClusterManifest.xml"),
+            "target": "/run/sf-bootstrap/ClusterManifest.xml", "read_only": True,
+        }]
     return compose, inventory["nodes"]
 
 
 class Cluster:
+    project_prefix = "sf-linux-"
+    image_repository = "sf-apps-node"
+    image_label = IMAGE_LABEL
+    services = NODES
+    admin_service = "tools"
+    generate = staticmethod(generate)
+    definition = staticmethod(definition)
+
     def __init__(self, directory, name):
         self.directory = directory
         self.name = name
-        self.project = validate_name(name)
+        self.project = validate_name(name, self.project_prefix)
         self.path = directory / "state.json"
         self.state = None
         self.deadline = None
@@ -200,7 +209,7 @@ class Cluster:
             raise ValueError("Unsupported image/runtime/manifest identity")
         if state.get("baseline") not in ("not-started", "submitting", "accepted", "complete"):
             raise ValueError("Invalid native baseline journal")
-        expected, nodes = definition(state, self.directory)
+        expected, nodes = self.definition(state, self.directory)
         if state.get("nodes") != nodes:
             raise ValueError("Recorded node allocation differs from the fixed seed topology")
         if digest(self.directory / "ClusterManifest.xml") != state["manifest_sha256"] \
@@ -224,7 +233,7 @@ class Cluster:
 
     @property
     def image_tag(self):
-        return "sf-apps-node:cluster-" + self.state["owner"]
+        return self.image_repository + ":cluster-" + self.state["owner"]
 
     def image_tag_id(self):
         image = run([
@@ -260,11 +269,11 @@ class Cluster:
         seen = set()
         for container in containers:
             service = container["Config"]["Labels"].get("com.docker.compose.service")
-            if service not in (*NODES, "tools") or service in seen \
+            if service not in (*self.services, self.admin_service) or service in seen \
                     or container["Image"] != self.state["image"]:
                 raise ValueError("Unexpected/duplicate container or image in owned project")
             seen.add(service)
-            if service in NODES:
+            if service in self.services:
                 node = next(node for node in self.state["nodes"] if node["node_name"] == service)
                 mounts = [mount for mount in container["Mounts"] if mount["Destination"] == "/var/lib/sf-node"]
                 if len(mounts) != 1 or mounts[0].get("Name") != node["volume_name"]:
@@ -322,7 +331,7 @@ class Cluster:
             raise ValueError("State directory exists without an allocation record; preserve and inspect it")
         image_data = json.loads(run(["docker", "image", "inspect", image]))[0]
         if image_data.get("Os") != "linux" or image_data.get("Architecture") != "amd64" \
-                or (image_data["Config"].get("Labels") or {}).get(IMAGE_LABEL) != "1":
+                or (image_data["Config"].get("Labels") or {}).get(self.image_label) != "1":
             raise ValueError("Build the repository's Linux amd64 cluster image first")
         image_id = image_data["Id"]
         run(["docker", "run", "--rm", "--pull", "never", "--network", "none", "--entrypoint", "bash", image_id,
@@ -337,7 +346,7 @@ class Cluster:
             "runtime_version": RUNTIME, "manifest_version": "1", "phase": "allocating",
             "baseline": "not-started", "publish_gateway": True,
         }
-        _, nodes = definition(self.state, self.directory)
+        _, nodes = self.definition(self.state, self.directory)
         self.state["nodes"] = nodes
         # Reject name collisions even after a previous successful destroy.
         ids = run(["docker", "ps", "-aq", "--filter", f"label=com.docker.compose.project={self.project}"]).strip()
@@ -348,12 +357,12 @@ class Cluster:
             raise ValueError("Project/container/network/volume name already exists; refusing adoption")
         self.subnet_check()
         self.directory.mkdir(mode=0o700, exist_ok=True)
-        _, _, manifest = generate(
+        _, _, manifest = self.generate(
             self.project, self.state["subnet"], image_id, image_id,
             self.directory / "ClusterManifest.xml",
         )
         write(self.directory / "ClusterManifest.xml", manifest)
-        compose, _ = definition(self.state, self.directory)
+        compose, _ = self.definition(self.state, self.directory)
         write_json(self.directory / "compose.json", compose)
         self.save(manifest_sha256=digest(self.directory / "ClusterManifest.xml"))
         self.event("allocated")
@@ -361,6 +370,9 @@ class Cluster:
 
     @contextmanager
     def tools(self):
+        if self.admin_service in self.services:
+            yield
+            return
         try:
             self.compose("up", "-d", "--no-deps", "--no-build", "--pull", "never", "tools")
             yield
@@ -375,7 +387,7 @@ class Cluster:
     def exec(self, *arguments, timeout=60, data=None):
         return run(
             ["docker", "compose", "--project-name", self.project, "--file",
-             self.directory / "compose.json", "exec", "-T", "tools", *arguments],
+             self.directory / "compose.json", "exec", "-T", self.admin_service, *arguments],
             timeout=self.remaining(timeout), data=data,
         )
 
@@ -479,7 +491,7 @@ class Cluster:
         for node in self.state["nodes"]:
             self.helper(node, READ_VOLUME, readonly=True)
         self.save(phase="starting")
-        self.compose("up", "-d", "--no-build", "--pull", "never", *NODES)
+        self.compose("up", "-d", "--no-build", "--pull", "never", *self.services)
         if restart_nodes:
             self.event("explicit-node-restart", nodes=list(restart_nodes))
             self.compose("restart", "--timeout", "45", *restart_nodes)
@@ -505,7 +517,7 @@ class Cluster:
         }
         result = {"name": self.name, "phase": self.state["phase"], "containers": summary,
                   "ready": False, "state": str(self.directory)}
-        if all(summary.get(node, {}).get("status") == "running" for node in NODES):
+        if all(summary.get(node, {}).get("status") == "running" for node in self.services):
             with self.tools():
                 result["service_fabric"] = self.probe()
             result["ready"] = result["service_fabric"]["ready"]
@@ -524,7 +536,7 @@ class Cluster:
         exits = {
             container["Config"]["Labels"]["com.docker.compose.service"]: container["State"]["ExitCode"]
             for container in containers
-            if container["Config"]["Labels"]["com.docker.compose.service"] in NODES
+            if container["Config"]["Labels"]["com.docker.compose.service"] in self.services
         }
         self.compose("down", "--timeout", "45")
         # Preserve allocating so up can finish an interrupted initial allocation.
@@ -563,9 +575,10 @@ def positive_timeout(value):
     return number
 
 
-def main():
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--state-root", type=Path, default=STATE_ROOT)
+def main(*, cluster_type=Cluster, state_root=STATE_ROOT, default_subnet=DEFAULT_SUBNET,
+         default_image="sf-apps-node:11.8.121.4", description=__doc__):
+    parser = argparse.ArgumentParser(description=description)
+    parser.add_argument("--state-root", type=Path, default=state_root)
     commands = parser.add_subparsers(dest="command", required=True)
     for command in ("create", "up", "status", "down", "destroy"):
         action = commands.add_parser(command)
@@ -573,11 +586,12 @@ def main():
         if command in ("create", "up"):
             action.add_argument("--timeout", type=positive_timeout, default=900)
         if command == "create":
-            action.add_argument("--subnet", default=DEFAULT_SUBNET,
+            action.add_argument("--subnet", default=default_subnet,
                                 help="Private IPv4 subnet (default: %(default)s)")
-            action.add_argument("--image", default="sf-apps-node:11.8.121.4")
+            action.add_argument("--image", default=default_image)
         if command == "up":
-            action.add_argument("--restart-node", choices=NODES, action="append", default=[])
+            action.add_argument("--restart-node", choices=cluster_type.services,
+                                action="append", default=[])
         if command == "destroy":
             action.add_argument("--confirm", required=True)
     args = parser.parse_args()
@@ -588,7 +602,7 @@ def main():
     check_local_docker()
     root = args.state_root.absolute()
     with locked(root, args.name) as directory:
-        cluster = Cluster(directory, args.name)
+        cluster = cluster_type(directory, args.name)
         if args.command == "create":
             result = cluster.create(args.subnet, args.image, args.timeout)
         else:
@@ -603,14 +617,18 @@ def main():
         return 1 if args.command == "status" and not result["ready"] else 0
 
 
-if __name__ == "__main__":
+def entrypoint(**kwargs):
     try:
-        sys.exit(main())
+        return main(**kwargs)
     except subprocess.CalledProcessError as error:
         print(f"ERROR: command failed ({error.returncode}): {' '.join(map(str, error.cmd[:5]))}\n"
               f"{error.stderr or error.stdout or ''}", file=sys.stderr)
-        sys.exit(1)
+        return 1
     except (OSError, ValueError, subprocess.TimeoutExpired) as error:
         print(f"ERROR: {error}. Cluster state is preserved; inspect state/last-status.json "
               "and Docker logs before retrying.", file=sys.stderr)
-        sys.exit(1)
+        return 1
+
+
+if __name__ == "__main__":
+    sys.exit(entrypoint())

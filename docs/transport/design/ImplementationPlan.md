@@ -42,6 +42,13 @@ uses native client port **19000** and HTTP port **19080**. Inspect the actual
 onebox configuration rather than assuming these defaults. The native protocol
 cannot be tested by pointing the Rust client at the HTTP endpoint.
 
+The [Ubuntu single-container onebox](../../UbuntuOnebox.md) provides a disposable
+repository-local clear-TCP environment with `just onebox-build` and
+`just onebox create NAME`. It publishes native TCP at `127.0.0.1:19000` and HTTP
+at `127.0.0.1:19080`; the multi-container workflow publishes only HTTP.
+Lifecycle readiness is not qualification of the future Rust client's protocol,
+and neither unsecured environment qualifies TLS.
+
 The existing [CI workflow](../../../.github/workflows/ci.yaml) and
 [justfile](../../../justfile) remain intact. Add isolated package-level tests
 without making the new crates depend on the existing native-backed applications.
@@ -560,4 +567,6 @@ Operator verification:
 - [Existing CI](../../../.github/workflows/ci.yaml)
 - [Linux container-cluster lifecycle](../../LinuxContainerCluster.md), optional
   development environment rather than the required onebox provisioning mechanism.
+- [Ubuntu single-container onebox](../../UbuntuOnebox.md), a disposable clear-TCP
+  environment with localhost native/HTTP gateways.
 - [Native and HTTP endpoint declarations](../../../docker/linux-cluster/ClusterManifest.template.xml)
