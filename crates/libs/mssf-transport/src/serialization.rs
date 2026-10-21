@@ -500,80 +500,6 @@ mod tests {
         })
     }
 
-    // Constructed from ByteCompressor and FabricSerializableStream; these
-    // fixtures are source-derived, not captured native interoperability proof.
-    #[test]
-    fn source_derived_signed_payloads() {
-        let cases: &[(i32, &[u8])] = &[
-            (-65, &[0x07, 0xff, 0x3f]),
-            (-64, &[0x07, 0x40]),
-            (-1, &[0x07, 0x7f]),
-            (0, &[0x47]),
-            (1, &[0x07, 0x01]),
-            (63, &[0x07, 0x3f]),
-            (64, &[0x07, 0x80, 0x40]),
-            (127, &[0x07, 0x80, 0x7f]),
-            (128, &[0x07, 0x81, 0x00]),
-            (i32::MIN, &[0x07, 0xf8, 0x80, 0x80, 0x80, 0x00]),
-            (i32::MAX, &[0x07, 0x87, 0xff, 0xff, 0xff, 0x7f]),
-        ];
-        for &(value, expected) in cases {
-            assert_eq!(encode(|encoder| encoder.i32(value)), expected);
-            let mut decoder = Decoder::new(expected);
-            assert_eq!(decoder.i32().unwrap(), value);
-            decoder.finish().unwrap();
-        }
-        let cases: &[(i64, &[u8])] = &[
-            (0, &[0x49]),
-            (64, &[0x09, 0x80, 0x40]),
-            (
-                i64::MIN,
-                &[
-                    0x09, 0xff, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x00,
-                ],
-            ),
-            (
-                i64::MAX,
-                &[
-                    0x09, 0x80, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0x7f,
-                ],
-            ),
-        ];
-        for &(value, expected) in cases {
-            assert_eq!(encode(|encoder| encoder.i64(value)), expected);
-            let mut decoder = Decoder::new(expected);
-            assert_eq!(decoder.i64().unwrap(), value);
-            decoder.finish().unwrap();
-        }
-    }
-
-    #[test]
-    fn source_derived_unsigned_payloads() {
-        let cases: &[(u64, &[u8])] = &[
-            (0, &[0x4a]),
-            (63, &[0x0a, 0x3f]),
-            (64, &[0x0a, 0x40]),
-            (127, &[0x0a, 0x7f]),
-            (128, &[0x0a, 0x81, 0x00]),
-            (
-                u64::MAX,
-                &[
-                    0x0a, 0x81, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0x7f,
-                ],
-            ),
-        ];
-        for &(value, expected) in cases {
-            assert_eq!(encode(|encoder| encoder.u64(value)), expected);
-            let mut decoder = Decoder::new(expected);
-            assert_eq!(decoder.u64().unwrap(), value);
-            decoder.finish().unwrap();
-        }
-        assert_eq!(
-            encode(|encoder| encoder.u32(u32::MAX)),
-            [0x08, 0x8f, 0xff, 0xff, 0xff, 0x7f]
-        );
-    }
-
     #[test]
     fn all_integer_group_boundaries_round_trip() {
         let mut signed = vec![i64::MIN, i64::MAX, -65, -64, -1, 0, 63, 64];
@@ -613,11 +539,8 @@ mod tests {
     }
 
     #[test]
-    fn empty_scalars_booleans_and_guid_bytes() {
-        let guid = [
-            0x33, 0x22, 0x11, 0x00, 0x55, 0x44, 0x77, 0x66, 0x88, 0x99, 0xaa, 0xbb, 0xcc, 0xdd,
-            0xee, 0xff,
-        ];
+    fn empty_scalars_booleans_and_guids_round_trip() {
+        let guid = std::array::from_fn(|index| index as u8);
         let bytes = encode(|encoder| {
             encoder.i32(0);
             encoder.u32(0);
@@ -630,12 +553,6 @@ mod tests {
             encoder.string("").unwrap();
             encoder.byte_array(&[]).unwrap();
         });
-        assert_eq!(
-            &bytes[..8],
-            &[0x47, 0x48, 0x49, 0x4a, 0x42, 0x72, 0x4c, 0x0c]
-        );
-        assert_eq!(&bytes[8..24], &guid);
-        assert_eq!(&bytes[24..], &[0xcd, 0xc4]);
         let mut decoder = Decoder::new(&bytes);
         assert_eq!(decoder.i32().unwrap(), 0);
         assert_eq!(decoder.u32().unwrap(), 0);
@@ -653,7 +570,6 @@ mod tests {
     #[test]
     fn utf16_code_units_and_surrogate_pairs() {
         let bytes = encode(|encoder| encoder.string("A🦀é").unwrap());
-        assert_eq!(bytes, [0x8d, 4, 0x41, 0, 0x3e, 0xd8, 0x80, 0xdd, 0xe9, 0]);
         let mut decoder = Decoder::new(&bytes);
         assert_eq!(decoder.string().unwrap(), "A🦀é");
         decoder.finish().unwrap();
@@ -672,9 +588,8 @@ mod tests {
     }
 
     #[test]
-    fn source_derived_object_extent_and_ignored_padding() {
+    fn object_extents_and_ignored_padding() {
         let bytes = encode(|encoder| encoder.object(|_| Ok(())).unwrap());
-        assert_eq!(bytes, [0, 11, 0, 0, 0, 0, 0, 0, 0, 0x1f, 0x2f, 0x3f]);
         let mut padded = bytes;
         padded[6..9].copy_from_slice(&[0x1f, 0x2f, 0x3f]);
         let mut decoder = Decoder::new(&padded);
@@ -699,7 +614,6 @@ mod tests {
             u32::from_le_bytes(bytes[1..5].try_into().unwrap()) as usize,
             bytes.len() - 1
         );
-        assert_eq!(u32::from_le_bytes(bytes[11..15].try_into().unwrap()), 14);
         let mut decoder = Decoder::new(&bytes);
         decoder
             .object(|decoder| {

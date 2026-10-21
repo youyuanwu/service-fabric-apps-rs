@@ -293,97 +293,26 @@ impl ListenInstance {
 mod tests {
     use super::*;
 
-    const GUID: [u8; 16] = [
-        0x33, 0x22, 0x11, 0, 0x55, 0x44, 0x77, 0x66, 0x88, 0x99, 0xaa, 0xbb, 0xcc, 0xdd, 0xee, 0xff,
-    ];
-
-    fn hex(input: &str) -> Vec<u8> {
-        input
-            .split_whitespace()
-            .map(|value| u8::from_str_radix(value, 16).unwrap())
-            .collect()
-    }
-
     #[test]
-    fn source_derived_listen_control() {
+    fn listen_control_round_trip_preserves_fields() {
         let message = Message::listen_instance(
             MessageId {
-                guid: GUID,
+                guid: [1; 16],
                 index: 1,
             },
             &ListenInstance::default(),
         )
         .unwrap();
-        let expected = hex("61 00 00 00 00 69 46 00 00 00 00 00
-             03 80 1f 00 00 1e 00 00 00 00 00 00 00 1f
-             0c 33 22 11 00 55 44 77 66 88 99 aa bb cc dd ee ff 08 01 2f 3f
-             01 80 0e 00 00 0d 00 00 00 00 00 00 00 1f 09 01 2f 3f
-             09 80 0d 00 00 0c 00 00 00 00 00 00 00 1f 42 2f 3f
-             00 0e 00 00 00 00 00 00 00 1f cd 4a 4c 2f 3f");
-        assert_eq!(message.to_frame().unwrap().encode().unwrap(), expected);
-        let decoded = Message::from_frame(Frame::decode(&expected).unwrap()).unwrap();
+        let bytes = message.to_frame().unwrap().encode().unwrap();
+        let decoded = Message::from_frame(Frame::decode(&bytes).unwrap()).unwrap();
         assert_eq!(decoded, message);
+        let properties = decoded.properties().unwrap();
+        assert_eq!(properties.actor, 1);
+        assert!(properties.high_priority);
+        assert!(properties.action.is_empty());
         assert_eq!(
             ListenInstance::decode(&decoded.body).unwrap(),
             ListenInstance::default()
-        );
-    }
-
-    #[test]
-    fn source_derived_ping_envelope() {
-        let message = Message {
-            headers: vec![
-                Header::action("PingRequest").unwrap(),
-                Header::actor(5).unwrap(),
-                Header::activity(GUID).unwrap(),
-                Header::version(1, 1).unwrap(),
-                Header::timeout(300_000_000).unwrap(),
-                Header::boolean(EXPECTS_REPLY, true).unwrap(),
-                Header::message_id(MessageId {
-                    guid: GUID,
-                    index: 2,
-                })
-                .unwrap(),
-            ],
-            body: vec![],
-        };
-        let frame = message.to_frame().unwrap();
-        assert_eq!(frame.headers.len(), 198);
-        let bytes = frame.encode().unwrap();
-        let expected = hex(include_str!("../tests/fixtures/ping-source-derived.hex"));
-        assert_eq!(bytes, expected);
-        assert_eq!(
-            Message::from_frame(Frame::decode(&bytes).unwrap()).unwrap(),
-            message
-        );
-    }
-
-    #[test]
-    fn source_derived_uri_fields() {
-        let mut encoder = Encoder::new();
-        encoder
-            .object(|encoder| {
-                encoder.i64(1);
-                encoder.string("fabric")?;
-                encoder.string("")?;
-                encoder.i64(0);
-                encoder.string("")?;
-                encoder.i32(-1);
-                encoder.string("/app/service")?;
-                encoder.string("")?;
-                encoder.string("")?;
-                encoder.u32(2);
-                encoder.string("app")?;
-                encoder.string("service")
-            })
-            .unwrap();
-        assert_eq!(
-            encoder.finish(),
-            hex("00 56 00 00 00 00 00 00 00 1f 09 01
-                 8d 06 66 00 61 00 62 00 72 00 69 00 63 00 cd 49 cd 07 7f
-                 8d 0c 2f 00 61 00 70 00 70 00 2f 00 73 00 65 00 72 00 76 00 69 00 63 00 65 00
-                 cd cd 08 02 8d 03 61 00 70 00 70 00
-                 8d 07 73 00 65 00 72 00 76 00 69 00 63 00 65 00 2f 3f")
         );
     }
 

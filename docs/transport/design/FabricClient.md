@@ -187,7 +187,7 @@ Every implemented operation needs a coverage entry recording:
 | Ordered request/reply schemas and type information | Define actual wire compatibility. |
 | Required headers and supported protocol versions | Avoid assumptions based on COM interface suffixes. |
 | Remote errors, paging, retry classification | Preserve operation semantics. |
-| Native-source references and independent fixtures | Make the mapping reviewable. |
+| Native-source references and independent live expectations | Make the mapping reviewable. |
 | Live gateway result and tested runtime/security profile | Separate implementation from demonstrated support. |
 
 Start with an in-repository coverage table near the implementation, not a
@@ -229,8 +229,8 @@ scope and compatibility semantics rather than infer them from Rust layout.
 
 The target little-endian ABI's `ObjectHeader` is expected to occupy eight bytes:
 four size bytes, one flag byte, and three padding bytes. Qualify that profile
-using source-derived encodings and real onebox messages; independent native
-serializer fixtures can strengthen the evidence when available. Emit
+using real onebox messages; source inspection guides implementation but does
+not establish runtime compatibility. Emit
 deterministic zero padding, but do not reject a valid native object because its
 padding bytes are nonzero. Native C++ padding is not a semantic field.
 [Sources: [object writer][native-object-writer],
@@ -300,10 +300,10 @@ configuration or application-facing JSON independently of native wire support.
 ### 5.4 Derive and implementation sequence
 
 First handwrite the bootstrap headers, transport controls, ping, and NameExists
-schemas against the bounded codec. Check encoding/decoding with source-derived
-vectors and real onebox exchanges as described in section 13 before generalizing
-schema generation. Native-generated fixtures add evidence when available but
-do not require a C++ build before implementation can start.
+schemas against the bounded codec. Check internal behavior with offline tests
+and qualify encoding/decoding through real onebox exchanges as described in
+section 13 before generalizing schema generation. Neither static packet
+snapshots nor a C++ fixture build is a compatibility prerequisite.
 
 Then, if repetition warrants it, add a Fabric-specific derive macro that
 generates ordered field operations, declared scope boundaries, inline versus
@@ -311,7 +311,7 @@ nested groups, and explicit trailing-field defaults. Keep specialized value,
 container, polymorphic, and unknown-data handling in reviewed codec helpers.
 The derive must use declared wire semantics, not Rust struct memory layout.
 
-A future derive macro or Serde adapter must pass the same native golden vectors
+A future derive macro or Serde adapter must pass the same live onebox cases
 and malformed-input checks as handwritten schemas, with no wire-format change.
 Neither is a prerequisite for the first compatible client.
 
@@ -561,8 +561,9 @@ The baseline native receiver tolerates some missing-header cases, and the
 comparison does not bind every clear negotiation header. For the initial
 strict profile, require the expected protected repetition when an initial peer
 header was present. A peer that cannot satisfy this profile is unsupported;
-historical exceptions require explicit fixtures and a separate compatibility
-decision. Never infer a safe downgrade from unauthenticated metadata.
+historical exceptions require explicit live native cases and a separate
+compatibility decision. Never infer a safe downgrade from unauthenticated
+metadata.
 
 Do not interpret a false or absent peer framing flag as permission to switch
 formats. Our advertised true flag can enable whole-frame protection at the peer;
@@ -807,8 +808,8 @@ External `QueryRequest` uses `[queryArgs_, queryName_]`, not the similarly named
 internal query body. Port the exact argument-key and map schemas. Typed query
 support includes result kind, polymorphic payload, query-processing error, and
 paging metadata. Implement a concrete node-list query first, then add result
-families with fixtures; a generic untyped query endpoint is not complete query
-support.
+families with independent onebox expectations; a generic untyped query endpoint
+is not complete query support.
 
 For forwarded management operations, set outer actor `NamingGateway` and action
 `"ForwardMessage"` while retaining original actor/action in `ForwardMessageHeader`.
@@ -937,29 +938,24 @@ requests and Rust decodes its replies, with operation results checked against
 independently established test state. Rust round trips alone are insufficient
 because a symmetric bug can pass both encoding and decoding.
 
-Start offline vectors from the pinned source and the message-format
-specification. Label them source-derived, not native-generated. Record sanitized
-native onebox replies as regression fixtures when their provenance and expected
-semantics are known. An existing native client using prebuilt libraries/tools
-can supply additional requests or result comparisons if available; it is not a
-prerequisite for the first client.
+Use the pinned source and message-format specification to guide implementation,
+not to manufacture an expected-byte oracle. Do not commit handwritten hex
+packets or normalized response snapshots as correctness fixtures. The real
+onebox must accept Rust requests and return independently verifiable results.
+An existing native client using prebuilt libraries/tools can supply optional
+result comparisons, but is not a prerequisite or replacement for onebox.
 
 Cover signed/unsigned integer boundaries, zero/empty values,
 UTF-16 non-BMP data, GUID byte order, enum values, TimeSpan sentinels, object
 padding/scopes/extensions, arrays/maps, all bootstrap headers/controls, ping,
 NameExists success/failure, and every later operation's request/reply variants.
-Distinguish source-derived/model coverage from cases actually observed on a
-native gateway. Record source revision or onebox runtime, profiled ABI
-assumptions, schema, field values, and expected decoded result with each fixture.
-Byte equality applies to deterministic meaningful fields; explicitly normalize
-only known nondeterminism such as object padding, generated IDs, and deadlines.
-Never normalize a field merely to make a mismatching fixture pass.
-
-If a native build becomes available, a small **test-only** fixture
-producer/consumer invoking the real serializer and message factories can
-strengthen exact edge-case coverage. Do not block initial implementation on
-compiling it, and do not reimplement the Rust codec in C++ as a supposed
-independent oracle. Constructed examples remain distinct from captured bytes.
+Offline unit/model/property tests cover internal consistency, bounds, and
+failure handling; they do not prove these values have the correct native
+interpretation. Record runtime/profile, independently established state, and
+actually executed cases with each live result. Cases not exercised against
+onebox remain unqualified rather than being certified by a byte snapshot.
+Raw traffic may be inspected locally for debugging, but is not a committed
+golden-test artifact or a substitute for live qualification.
 
 ### 13.2 Stream and state-machine tests
 
@@ -1004,8 +1000,8 @@ public results with independently established state through available management
 tools and, where available, a prebuilt native FabricClient. HTTP state checks do
 not independently prove native encoding or map HTTP statuses to native error
 codes. A Rust mock gateway is not sufficient.
-Use only isolated disposable test resources for mutation coverage. Captures and
-fixtures use synthetic identities/data and must exclude real keys, tokens, and
+Use only isolated disposable test resources for mutation coverage. Synthetic
+test state and live evidence reports must exclude real keys, tokens, and
 sensitive operation bodies.
 
 An unsecured onebox qualifies only clear TCP. If no secured native gateway is
@@ -1017,10 +1013,10 @@ Rust-to-Rust TLS tests or silently reconfigure a shared onebox.
 
 | Phase | Deliverable | Exit gate |
 |---|---|---|
-| 0: feasibility | Dependency/provider review, observed onebox endpoint/runtime/security profile, source-derived ABI/serializer vectors; begin a small TLS spike as soon as the secured environment and framing exist. | Onebox test contract is explicit. Native TLS handoff/control proof is required before a TLS compatibility claim, not before clear-TCP development. |
-| 1: codec | Bounded serializer, frames, headers, IDs, control schemas. | Source-derived vectors, fragmentation, malformed input, and allocation bounds pass; native response fixtures are added when available. |
+| 0: feasibility | Dependency/provider review, observed onebox endpoint/runtime/security profile, ABI/serializer source analysis; begin a small TLS spike as soon as the secured environment and framing exist. | Onebox test contract is explicit. Native TLS handoff/control proof is required before a TLS compatibility claim, not before clear-TCP development. |
+| 1: codec | Bounded serializer, frames, headers, IDs, control schemas. | Internal consistency, fragmentation, malformed input, and allocation bounds pass; native correctness is qualified through live operations, not golden bytes. |
 | 2: first client | Gateway manager, ping, request table, NameExists, explicit clear TCP and separately qualified certificate TLS. | Existing/nonexistent names match independent onebox state; errors, concurrent replies, cancellation and reconnect preserve delivery semantics. |
-| 3: useful reads | Typed node query with paging, uncached partition resolution, then bounded version-aware cache. | Live results and available native response fixtures agree with known state, including claimed stale/error/paging cases. |
+| 3: useful reads | Typed node query with paging, uncached partition resolution, then bounded version-aware cache. | Live onebox results agree with independently known state, including claimed stale/error/paging cases. |
 | 4: sessions | Claims profile, priority connections, notification filters, acknowledgments, reconnect synchronization. | Authentication denial and slow-consumer/failover cases work without false readiness or silent event loss. |
 | 5: management breadth | Add one method family at a time; separately design health reporting and file transfer. | Every shipped method has the coverage evidence from section 4; protocol 1.2 enabled only with upload support. |
 | 6: release | Compatibility matrix, dependency/security review, public API/coverage docs, stability policy. | Claims are limited to tested runtime/security/operation combinations; all-Rust crypto profile has explicit production approval. |
@@ -1035,7 +1031,7 @@ breadth grows.
 
 | Risk or decision | Resolution / required evidence |
 |---|---|
-| Native serialization is not a standardized Rust format | Combine source-derived vectors with native onebox exchanges before operation breadth; add native-generated edge fixtures when available. |
+| Native serialization is not a standardized Rust format | Use source analysis for implementation and real onebox exchanges for compatibility; unexercised edge cases remain unqualified. |
 | rustls cannot be attached directly to TCP at byte zero | Custom low-level byte-routing driver with explicit final-flight ordering. |
 | Cryptographic provider may conflict with a strict all-Rust requirement | Explicit dependency review; experimental RustCrypto status blocks an unqualified production claim. |
 | Older/deployed TLS policy may have no common secure configuration | Identify supported runtime profiles; return unsupported/incompatible security, never weaken TLS to connect. |

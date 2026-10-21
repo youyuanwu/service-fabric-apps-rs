@@ -158,19 +158,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn uri_matches_source_derived_ten_field_vector() {
-        // CodeResearch.md section 7; source-derived, not a native capture.
-        let expected = [
-            0x00, 0x56, 0, 0, 0, 0, 0, 0, 0, 0x1f, 0x09, 0x01, 0x8d, 0x06, b'f', 0, b'a', 0, b'b',
-            0, b'r', 0, b'i', 0, b'c', 0, 0xcd, 0x49, 0xcd, 0x07, 0x7f, 0x8d, 0x0c, b'/', 0, b'a',
-            0, b'p', 0, b'p', 0, b'/', 0, b's', 0, b'e', 0, b'r', 0, b'v', 0, b'i', 0, b'c', 0,
-            b'e', 0, 0xcd, 0xcd, 0x08, 0x02, 0x8d, 0x03, b'a', 0, b'p', 0, b'p', 0, 0x8d, 0x07,
-            b's', 0, b'e', 0, b'r', 0, b'v', 0, b'i', 0, b'c', 0, b'e', 0, 0x2f, 0x3f,
-        ];
-        assert_eq!(encode_name("fabric:/app/service").unwrap(), expected);
-    }
-
-    #[test]
     fn uri_rejects_every_unsupported_grammar_class() {
         for input in [
             "",

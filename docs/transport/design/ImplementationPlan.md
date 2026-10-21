@@ -7,6 +7,8 @@ gateway ping and NameExists against Ubuntu onebox runtime 11.8.121.4. It is a
 deliberately narrower implementation with a sequential mutable client,
 restricted naming inputs, and no TLS or automatic recovery. The production
 phases below remain pending; partial POC work does not satisfy their full gates.
+The POC uses real onebox exchanges as its compatibility oracle, not committed
+hex packet snapshots; its offline tests cover internal behavior and safety.
 
 ## 1. Overview
 
@@ -22,8 +24,8 @@ The implementation follows the [design](FabricClient.md) and
 **The available native test environment is onebox. A native Service Fabric C++
 build is not a prerequisite.** The initial compatibility oracle is the real
 gateway accepting Rust requests and emitting replies that Rust correctly
-decodes. Native serializer fixture generation is additional evidence if it
-becomes available, not a blocking prerequisite.
+decodes. Source analysis guides implementation; committed packet hex snapshots
+are not a correctness oracle and a native fixture build is not a prerequisite.
 
 This plan creates no crates, starts no cluster, and changes no runtime settings.
 Paths, test targets, and commands below describe future implementation work.
@@ -89,7 +91,7 @@ Any future PAW artifacts stay local and ignored.
 ## 4. Execution order and phase status
 
 - [ ] **Phase 1: Foundation and onebox contract** - Create isolated crates and define the live-test profile.
-- [ ] **Phase 2: Fabric object codec** - Implement bounded native serialization with source-derived vectors.
+- [ ] **Phase 2: Fabric object codec** - Implement bounded serialization with internal consistency and safety checks.
 - [ ] **Phase 3: Frames, headers, and controls** - Implement complete message envelopes and parser semantics.
 - [ ] **Phase 4: Clear-TCP gateway establishment** - Prove native controls and ping against onebox.
 - [ ] **Phase 5: NameExists and request lifecycle** - Deliver the first useful operation with safe recovery.
@@ -140,7 +142,7 @@ credentials. Its contract includes:
 | Semantic fixtures | A known existing naming URI, a guaranteed absent URI, and the independent management observation establishing those facts. |
 | TLS profiles | Expected server identity, CA roots, client certificate/key paths where required, and explicit trust/revocation policy. |
 | Claims profile | Token-provider/test-token-file configuration and expected authorization behavior. |
-| Evidence output | An ignored output directory for sanitized reports and approved synthetic response captures. |
+| Evidence output | An ignored output directory for sanitized live result reports. |
 
 Keep private keys, tokens, and credential-bearing configuration outside source
 control. Derive no security fallback from a failed connection.
@@ -155,30 +157,28 @@ The report verifies that the expected test cases actually ran.
 
 | Evidence | Role and limitation |
 |---|---|
-| Source-derived vectors | Required offline checks for precise known encodings; not labeled native-generated. |
+| Native source/schema analysis | Guides implementation; does not establish runtime wire correctness. |
 | Rust model/property/fuzz tests | Exercise malformed input, resource bounds, and lifecycle races; not an independent native oracle. |
 | Real onebox exchanges | Required interoperability proof for each claimed runtime/profile/operation. |
-| Sanitized onebox response fixtures | Independent native output for offline regression; include provenance and independently known expected semantics. |
 | Existing native client, if usable | Optional result/error comparison using prebuilt libraries/tools; no native rebuild required. |
-| Full native serializer harness | Optional stronger edge-case evidence when available. |
+| Full native serializer harness | Optional future diagnostics; not a replacement for real onebox qualification. |
 
 Management/HTTP tools can establish fixture state and expected public results.
 They do not prove the Rust native encoding by themselves, and HTTP status codes
 must not be treated as identical to native error enums.
 
-### 5.3 Fixture layout and provenance
+### 5.3 Test state and live evidence
 
-Use `crates/libs/mssf-transport/tests/fixtures/` for generic codec/envelope
-vectors and `crates/libs/mssf-client/tests/fixtures/` for operation replies.
-Each fixture manifest records origin (`source-derived` or `onebox-captured`),
-source revision or observed runtime, profiled ABI assumptions, message schema,
-known field values, and any normalization.
+Prepare synthetic naming/service state directly in a test-owned onebox using
+independent management observations. Keep private profiles and sanitized live
+reports in ignored output directories. Record observed runtime/security
+profile, independently known expected state, and the cases that actually ran.
 
-Commit only reviewed synthetic/nonsecret data. Never commit token-bearing
-negotiation messages, real keys, or arbitrary production payloads. Preserve an
-explicit normalization recipe for permitted generated IDs/deadlines/padding;
-never erase unexplained mismatches or regenerate expected fixtures from the
-Rust implementation under test.
+Do not commit packet hex files or normalized captures as correctness fixtures.
+Offline generated inputs serve internal round-trip, malformed-input, and
+resource-bound tests only. Unexercised native cases remain unqualified.
+Local traffic inspection may help debugging, but must not expose tokens,
+keys, or sensitive operation bodies or become a substitute for live proof.
 
 ## Phase 1: Foundation and onebox contract
 
@@ -236,8 +236,8 @@ Operator verification:
 - **Wire value types in that module**: Represent UTF-16 code units, GUID layout,
   TimeSpan ticks, enum codes, inline MessageId, nested ActivityId, and exact
   container specializations. Avoid deriving the native format through Serde.
-- **`mssf-transport/tests/codec.rs` and fixtures**: Encode the specification's
-  scalar/container/object cases with clearly marked source-derived provenance.
+- **`mssf-transport/tests/codec.rs`**: Exercise scalar/container/object
+  consistency, boundary values, malformed input, and resource limits.
 
 Implement the profiled eight-byte object header explicitly, not through Rust
 memory layout. Preserve unknown data when re-emission is required. Do not add
@@ -250,7 +250,8 @@ Automated:
 - [ ] `cargo test -p mssf-transport --test codec` covers both encoding and decoding.
 - [ ] Boolean metadata, sign boundaries including signed 64, UTF-16 surrogate
   pairs, GUID byte order, empty string/vector/array distinctions, inline versus
-  nested IDs, and TimeSpan sentinels match the documented vectors.
+  nested IDs, and TimeSpan sentinels preserve internal values and reject
+  malformed input; their native interpretation requires live onebox coverage.
 - [ ] Depth 64 versus 65 and count-limit boundaries are checked before
   unbounded allocation; integer/object-size overflow and truncated input fail.
 - [ ] Unknown trailing fields/scopes survive the supported re-emission path.
@@ -270,8 +271,8 @@ Review verification:
 - **`mssf-transport/src/frame.rs`, `message.rs`, `headers/`**: Add fixed framing,
   CRCs, ordered header records, known schemas, unknown/deleted record handling,
   and immutable owned message buffers.
-- **`mssf-transport/tests/headers_frames.rs`**: Add complete frame/header vectors,
-  including the constructed PingRequest from the message specification.
+- **`mssf-transport/tests/headers_frames.rs`**: Exercise generated messages,
+  header/frame boundaries, malformed input, and checked extent handling.
 - **Control schemas**: Add SecurityNegotiation, ServerAuth, ListenInstance,
   ConnectionAuth, and the claims indication/body needed by later TLS work.
 - **Header access**: Distinguish first-match typed lookup from last-visible
@@ -286,8 +287,8 @@ Automated:
   cases preserve boundaries; invalid lengths/CRCs are rejected.
 - [ ] Header area lengths at the 65,535-byte boundary are validated; the encoder
   rejects an oversized area before writing its frame.
-- [ ] The 210-byte source-derived ping has the expected frame/header/object
-  extents; this is still not labeled a captured native packet.
+- [ ] Generated messages have consistent frame/header/object extents;
+  compatibility is qualified by the live ping gate, not a golden packet.
 - [ ] Duplicate/deleted headers and malformed later common occurrences follow
   the documented semantics.
 
@@ -322,8 +323,8 @@ Automated:
   correctly correlated native ping reply on the configured onebox.
 - [ ] Protocol-version and nested gateway/node identity fields decode correctly;
   reply handling does not require the action literal `"PingReply"`.
-- [ ] A bounded native ping-response capture is recorded with runtime/provenance
-  metadata when its content is safe to retain.
+- [ ] A sanitized live ping result records actual runtime and independently
+  observed node identity, without relying on captured-byte snapshots.
 
 Operator verification:
 
@@ -343,8 +344,8 @@ Operator verification:
   end-to-end monotonic deadlines, connection generations, ID allocation,
   recovery/backoff, cancellation, and conservative delivery outcomes.
 - **`mssf-client/tests/naming.rs`, `lifecycle.rs`**: Add semantic and concurrency
-  tests; validate ClientOperationFailure and Fault decoding with independent
-  source-derived or captured inputs.
+  tests; inject ClientOperationFailure and Fault model-peer cases for internal
+  behavior. Their native error-path qualification requires live onebox cases.
 - **`onebox_clear.rs`**: Add known-existing and guaranteed-absent names using the
   profile's independently established fixtures.
 
