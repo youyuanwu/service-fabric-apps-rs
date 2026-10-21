@@ -58,7 +58,7 @@ fn successful(response: Response) -> Result<Response> {
 
 #[tokio::test]
 #[ignore = "creates fixtures on a fresh disposable local onebox; requires MSSF_TEST_CONFIG and MSSF_TEST_REPORT"]
-async fn prepare_onebox_fixtures() -> Result<()> {
+async fn onebox_prepare_fixtures() -> Result<()> {
     let config_path = output_from_env("MSSF_TEST_CONFIG")?;
     let report_path = output_from_env("MSSF_TEST_REPORT")?;
     if config_path == report_path {

@@ -9,6 +9,9 @@ restricted naming inputs, and no TLS or automatic recovery. The production
 phases below remain pending; partial POC work does not satisfy their full gates.
 The POC uses real onebox exchanges as its compatibility oracle, not committed
 hex packet snapshots; its offline tests cover internal behavior and safety.
+Its Linux CI builds a nextest archive once, then transfers it to the onebox
+runner; tests needing onebox share the `onebox` group. See the POC guide for
+the current archive/group commands rather than the future phase examples below.
 
 ## 1. Overview
 

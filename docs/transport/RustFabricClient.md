@@ -141,10 +141,13 @@ explicitly. General native forward compatibility is not claimed.
 
 ## 5. Offline and native qualification
 
-Ordinary checks need neither onebox nor native client libraries:
+Use nextest 0.9.146, pinned in CI. The repository requires at least 0.9.133 for
+test-group filters. Ordinary checks need neither onebox nor native client
+libraries:
 
 ```sh
-cargo test --locked -p mssf-transport -p mssf-client
+cargo nextest run --locked -p mssf-transport -p mssf-client \
+  -E 'not group(onebox)' --no-tests fail
 cargo clippy --locked -p mssf-transport -p mssf-client --all-targets -- -D warnings
 cargo doc --locked -p mssf-transport -p mssf-client --no-deps
 ```
@@ -156,16 +159,24 @@ There are no committed golden packet hex files or normalized capture snapshots.
 Native compatibility claims require the live setup and native-client targets
 below to pass against the real onebox.
 
-Both live targets are ignored by default. On a fresh disposable local onebox,
-the Rust `onebox_setup` helper uses test-only `reqwest` HTTP calls to prepare
-synthetic names and independently observe gateway identity:
+Tests that need onebox are named `onebox_*` and assigned to the shared
+**`onebox` nextest group** in `.config/nextest.toml`. They remain `#[ignore]`
+for ordinary Cargo runs. The group permits only one test at a time, but
+serialization does not guarantee setup order: run preparation first, then
+the remaining group tests.
+
+On a fresh disposable local onebox, the Rust `onebox_setup` helper uses
+test-only `reqwest` HTTP calls to prepare synthetic names and independently
+observe gateway identity:
 
 ```sh
 mkdir -p build/poc-native
 export MSSF_TEST_CONFIG="$PWD/build/poc-native/config.json"
 export MSSF_TEST_REPORT="$PWD/build/poc-native/report.json"
-cargo test --locked -p mssf-client --test onebox_setup -- --ignored
-cargo test --locked -p mssf-client --test onebox_clear -- --ignored
+cargo nextest run --locked -p mssf-client --run-ignored all \
+  -E 'group(onebox) & test(=onebox_prepare_fixtures)' --no-tests fail
+cargo nextest run --locked -p mssf-client --run-ignored all \
+  -E 'group(onebox) & not test(=onebox_prepare_fixtures)' --no-tests fail
 ```
 
 Setup uses the published local HTTP gateway at `127.0.0.1:19080` and records
@@ -195,12 +206,14 @@ independently using `GET /Names/NAME?api-version=6.0`; absent is HTTP 404.
 HTTP is fixture preparation/observation only. Native results are obtained
 exclusively through the Rust native connection.
 
-Use **absolute paths** for both the configuration file and report. Cargo runs
-integration tests from the package directory:
+Use **absolute paths** for both the configuration file and report. Integration
+tests run from the package directory. With an independently prepared profile,
+run only the native cases, not preparation:
 
 ```sh
 MSSF_TEST_CONFIG="$PWD/build/poc-native-config.json" \
-  cargo test --locked -p mssf-client --test onebox_clear -- --ignored
+  cargo nextest run --locked -p mssf-client --run-ignored all \
+    -E 'group(onebox) & not test(=onebox_prepare_fixtures)' --no-tests fail
 ```
 
 The selected test fails on missing/wrong configuration, inaccessible native
@@ -209,10 +222,40 @@ only after ping, true/false naming results on the same connection, and explicit
 close pass. Runtime metadata comes from the independent preparation; the ping
 body does not advertise the server's code version.
 
-CI runs native-free Linux checks, then uses the Rust setup helper and configured
-native target inside its existing disposable onebox lifecycle job. Only the
-success report is uploaded, never the private configuration, raw runtime logs,
-or credentials.
+### Build once, run the archive on onebox
+
+The Linux Rust job compiles the selected packages' test binaries, including
+ignored onebox cases, into a Zstandard-compressed tar archive:
+
+```sh
+cargo nextest archive --locked -p mssf-transport -p mssf-client \
+  --archive-file build/native-client-tests.tar.zst
+cargo nextest run --archive-file build/native-client-tests.tar.zst \
+  -E 'not group(onebox)' --no-tests fail
+```
+
+CI uploads that archive after the Rust checks pass. The Linux lifecycle matrix
+depends on the producer; only its onebox entry downloads and consumes the
+archive. No additional job is created. Both runners use Ubuntu 24.04 and the
+same pinned nextest version.
+
+On the target, check out the same source revision and provide the absolute
+private profile/report paths as above. Rust and Cargo are not required to
+execute the archive; use the standalone runner:
+
+```sh
+archive=/absolute/path/native-client-tests.tar.zst
+cargo-nextest nextest run --archive-file "$archive" --workspace-remap "$PWD" \
+  --run-ignored all -E 'group(onebox) & test(=onebox_prepare_fixtures)' --no-tests fail
+cargo-nextest nextest run --archive-file "$archive" --workspace-remap "$PWD" \
+  --run-ignored all -E 'group(onebox) & not test(=onebox_prepare_fixtures)' --no-tests fail
+```
+
+These commands extract and execute prebuilt tests without rebuilding them.
+`--workspace-remap` handles a different checkout path. Empty selections fail
+rather than silently reporting success. Only the sanitized native success
+report and compiled test archive are uploaded, never the private configuration,
+raw runtime logs, or credentials.
 
 ## 6. Deliberate exclusions
 

@@ -65,7 +65,7 @@ impl Config {
 /// fixtures is an error, never a successful skip.
 #[tokio::test]
 #[ignore = "requires an independently prepared clear onebox and MSSF_TEST_CONFIG"]
-async fn configured_onebox_ping_and_name_exists() {
+async fn onebox_ping_and_name_exists() {
     let path = PathBuf::from(
         std::env::var_os("MSSF_TEST_CONFIG")
             .expect("MSSF_TEST_CONFIG must point to the private JSON fixture configuration"),
