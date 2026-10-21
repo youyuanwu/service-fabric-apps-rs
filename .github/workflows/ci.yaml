@@ -5,7 +5,65 @@ on:
     branches: [main]
   pull_request:
 
+env:
+  NEXTEST_VERSION: "0.9.146"
+
 jobs:
+  rust-native-client:
+    name: Native-free Rust client
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+    - uses: actions/checkout@v7
+      with:
+        persist-credentials: false
+
+    - name: Install Rust toolchain with cache
+      uses: actions-rust-lang/setup-rust-toolchain@v2
+      with:
+        components: rustfmt, clippy
+        cache: true
+        rustflags: ""
+
+    - name: Check formatting
+      run: cargo fmt --all -- --check
+
+    - name: Install pinned nextest
+      uses: taiki-e/install-action@v2
+      with:
+        tool: cargo-nextest@${{ env.NEXTEST_VERSION }}
+        fallback: none
+
+    - name: Build and archive native-client tests
+      run: |
+        cargo nextest archive --locked -p mssf-transport -p mssf-client \
+          --archive-file "$RUNNER_TEMP/native-client-tests.tar.zst"
+
+    - name: Test isolated native-free packages
+      run: |
+        cargo nextest run --archive-file "$RUNNER_TEMP/native-client-tests.tar.zst" \
+          -E 'not group(onebox)' --no-tests fail
+
+    - name: Lint native-free packages
+      run: cargo clippy --locked -p mssf-transport -p mssf-client --all-targets -- -D warnings
+
+    - name: Build API documentation
+      run: cargo doc --locked -p mssf-transport -p mssf-client --no-deps
+      env:
+        RUSTDOCFLAGS: -D warnings
+
+    - name: Upload native-client test archive
+      uses: actions/upload-artifact@v4
+      with:
+        name: native-client-tests
+        path: ${{ runner.temp }}/native-client-tests.tar.zst
+        if-no-files-found: error
+        compression-level: 0
+        overwrite: true
+        retention-days: 7
+
   build:
     runs-on: windows-latest
     steps:
@@ -71,6 +129,7 @@ jobs:
 
   linux-cluster:
     name: Linux ${{ matrix.topology }} lifecycle
+    needs: rust-native-client
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     strategy:
@@ -109,6 +168,20 @@ jobs:
       with:
         python-version: "3.12"
 
+    - name: Install pinned nextest
+      if: matrix.topology == 'onebox'
+      uses: taiki-e/install-action@v2
+      with:
+        tool: cargo-nextest@${{ env.NEXTEST_VERSION }}
+        fallback: none
+
+    - name: Download native-client test archive
+      if: matrix.topology == 'onebox'
+      uses: actions/download-artifact@v4
+      with:
+        name: native-client-tests
+        path: ${{ runner.temp }}/native-client-tests
+
     - name: Check runner prerequisites
       run: |
         docker info
@@ -128,6 +201,37 @@ jobs:
 
     - name: Check fresh cluster health
       run: python3 "$CLUSTER_CTL" status "$CLUSTER_NAME" > "$RUNNER_TEMP/linux-cluster-status-created.json"
+
+    - name: Prepare onebox test data and expected results
+      if: matrix.topology == 'onebox'
+      run: |
+        cargo-nextest nextest run \
+          --archive-file "$RUNNER_TEMP/native-client-tests/native-client-tests.tar.zst" \
+          --workspace-remap "$GITHUB_WORKSPACE" \
+          --run-ignored all -E 'group(onebox) & test(=onebox_prepare_fixtures)' --no-tests fail
+      env:
+        MSSF_TEST_CONFIG: ${{ runner.temp }}/native-client-config.json
+        MSSF_TEST_REPORT: ${{ runner.temp }}/native-client-report.json
+
+    - name: Exercise real native ping and NameExists
+      id: native_client
+      if: matrix.topology == 'onebox'
+      run: |
+        cargo-nextest nextest run \
+          --archive-file "$RUNNER_TEMP/native-client-tests/native-client-tests.tar.zst" \
+          --workspace-remap "$GITHUB_WORKSPACE" \
+          --run-ignored all -E 'group(onebox) & not test(=onebox_prepare_fixtures)' --no-tests fail
+      env:
+        MSSF_TEST_CONFIG: ${{ runner.temp }}/native-client-config.json
+
+    - name: Upload successful native client evidence
+      if: matrix.topology == 'onebox' && steps.native_client.outcome == 'success'
+      uses: actions/upload-artifact@v4
+      with:
+        name: native-client-${{ github.run_id }}-${{ github.run_attempt }}
+        path: ${{ runner.temp }}/native-client-report.json
+        if-no-files-found: error
+        retention-days: 7
 
     - name: Create retained naming-store fixture
       run: |
