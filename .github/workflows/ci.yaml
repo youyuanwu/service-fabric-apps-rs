@@ -123,7 +123,7 @@ jobs:
     - name: Build pinned Ubuntu image
       run: docker build --tag "${{ matrix.image }}" --file "${{ matrix.dockerfile }}" "${{ matrix.context }}"
 
-    - name: Create cluster and native baseline
+    - name: Create native development cluster
       run: python3 "$CLUSTER_CTL" create "$CLUSTER_NAME"
 
     - name: Check fresh cluster health

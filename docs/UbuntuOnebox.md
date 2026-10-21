@@ -12,8 +12,9 @@ The topology and endpoint assignments are ported from
 `7ad146aea4dd2d23b3886121c32175e75e024b06`. The destructive shell bootstrap is
 replaced by the same guarded lifecycle used for the
 [multi-container cluster](LinuxContainerCluster.md). The two workflows share
-resource ownership checks, image retention, native baseline provisioning,
-readiness checks, shutdown handling, and account/tracing setup.
+resource ownership checks, image retention, readiness checks, shutdown handling,
+and account/tracing setup. Unlike the multi-container cluster, onebox does not
+provision or upgrade a native Cluster Manager baseline.
 
 ## Build and create
 
@@ -78,12 +79,26 @@ As in the source onebox, minimum replica-set size is one for local
 development; this is not a production configuration.
 
 `create` freezes and privately tags the immutable local image ID, generates new
-file-store credentials, and deploys all five nodes. It then provisions the native
-Cluster Manager baseline at code/configuration `11.8.121.4 / 1`. Success requires
-every HTTP gateway to report the recorded manifest, five Up/enabled/Ok nodes,
-healthy three-replica system partitions, completed native baseline, and 30 seconds
-of stable health. A running Docker container or an open port alone is not success.
-Bring-up normally takes several minutes. No sample app is deployed implicitly.
+file-store credentials, and deploys all five nodes. Like the source onebox, it
+**does not upload/provision runtime packages or submit a baseline upgrade**.
+There is no fixed 30-second stability wait: creation returns on the first healthy
+observation of every HTTP gateway, the recorded manifest, five Up/enabled/Ok
+nodes at code/configuration `11.8.121.4 / 1`, and healthy three-active-replica system
+partitions. A running Docker container or an open port alone is not success.
+No sample app is deployed implicitly.
+
+Native cluster-upgrade progress may retain its bootstrap placeholder
+(`0.0.0.0`, empty configuration, `Invalid` upgrade mode). That is expected for
+this profile: readiness checks the actual node/runtime and manifest versions,
+not completion of an unnecessary upgrade. `up` uses the same fast readiness path;
+it does not add a baseline to a retained cluster or remove a baseline established
+by an older controller. Full native recovery can still take several minutes
+after a complete retained shutdown.
+
+The source script's default startup deletes existing cluster data. This
+controller deliberately preserves it on `up`. For an intentionally fresh,
+disposable instance, use confirmed `destroy` followed by `create`; deleting state
+is never an automatic startup optimization.
 
 ## Lifecycle
 
@@ -145,9 +160,11 @@ The explicit restart affects the **entire five-node container**, not an individu
 SF node. It retains data and waits for full recovery. It is never an automatic
 fallback for failed readiness.
 
-An interrupted initial deployment (`configuring` identity), pending native
-`TargetInformation.xml`, or ambiguous baseline submission requires investigation.
-An already accepted baseline is observed rather than submitted twice. Use
+An interrupted initial deployment (`configuring` identity) or pending native
+`TargetInformation.xml` requires investigation. Onebox never submits baseline
+upgrades, including when resuming an allocation created by an older controller.
+An interrupted upgrade from that older workflow still requires inspection; the
+fast-start path does not undo it or reset its journal. Use
 `destroy`/`create` only when intentionally discarding a disposable allocation.
 No global Docker prune or force-volume deletion is part of this workflow.
 
@@ -161,10 +178,11 @@ Linux images are outside this port.
 
 The Linux lifecycle matrix in `.github/workflows/ci.yaml` independently builds and
 runs the multi-container cluster and this single-container onebox on Ubuntu
-24.04 hosts. Each entry exercises creation/native baseline, health, retained
-down/up, resumed health, and survival of a synthetic naming-store entry. It always
-attempts allowlisted credential-safe
-diagnostics and exact-name confirmed teardown. XML, raw runtime logs,
+24.04 hosts. Each entry exercises creation, health, retained down/up, resumed
+health, and survival of a synthetic naming-store entry. Only the multi-container
+entry establishes a native baseline; onebox uses source-style startup without
+upgrades or a fixed stability wait. Each entry always attempts allowlisted
+credential-safe diagnostics and exact-name confirmed teardown. XML, raw runtime logs,
 environment variables, and arbitrary health/error text are not uploaded.
 
 Run the offline controller tests without Docker:
@@ -174,5 +192,6 @@ python3 -m unittest discover -s scripts -p "test_linux*.py"
 ```
 
 Onebox tests also check five-node port separation, all-five-gateway readiness,
-three-replica placement, a single retained volume, and absence of an auxiliary
-tools container. Linux-only tests skip during Windows test discovery.
+three-replica placement, a single retained volume, absence of baseline submission
+and artificial stabilization waits, and absence of an auxiliary tools container.
+Linux-only tests skip during Windows test discovery.

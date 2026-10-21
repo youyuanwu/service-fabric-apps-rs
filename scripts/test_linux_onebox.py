@@ -112,6 +112,7 @@ class OneboxTests(unittest.TestCase):
         self.assertEqual(self.cluster.path.stat().st_mode & 0o777, 0o600)
 
     def test_up_retains_one_volume_and_does_not_start_a_tools_container(self):
+        self.cluster.save(baseline="not-started")
         with patch.object(self.cluster, "retain_image"), \
                 patch.object(self.cluster, "resources"), \
                 patch.object(self.cluster, "subnet_check"), \
@@ -119,17 +120,42 @@ class OneboxTests(unittest.TestCase):
                 patch.object(self.cluster, "allocate") as allocate, \
                 patch.object(self.cluster, "compose") as compose, \
                 patch.object(self.cluster, "wait") as wait, \
-                patch.object(self.cluster, "establish_baseline"):
+                patch.object(self.cluster, "establish_baseline") as baseline:
             result = self.cluster.up(900, ["onebox"])
         allocate.assert_not_called()
+        baseline.assert_not_called()
         helper.assert_called_once_with(self.cluster.state["nodes"][0], ctl.READ_VOLUME, readonly=True)
         self.assertEqual([call.args for call in compose.call_args_list], [
             ("up", "-d", "--no-build", "--pull", "never", "onebox"),
             ("restart", "--timeout", "45", "onebox"),
         ])
-        self.assertEqual([call.args for call in wait.call_args_list], [(False,), (True,)])
+        wait.assert_called_once_with(False, stable=0)
+        self.assertEqual(self.cluster.state["baseline"], "not-started")
         self.assertEqual(result["nodes"], list(onebox.NODES))
         self.assertEqual(result["client_endpoint"], "127.0.0.1:19000")
+
+    def test_probe_does_not_require_a_baseline_unless_explicitly_requested(self):
+        for argument, required in ((None, False), (True, True), (False, False)):
+            with self.subTest(argument=argument), \
+                    patch.object(self.cluster, "exec", return_value='{"ready":true}') as execute:
+                self.cluster.probe(argument)
+                self.assertIs(json.loads(execute.call_args.kwargs["data"])["baseline_required"],
+                              required)
+
+    def test_retained_baseline_is_not_cleared_or_resubmitted(self):
+        for journal in ("not-started", "submitting", "accepted", "complete"):
+            with self.subTest(journal=journal):
+                self.cluster.save(baseline=journal)
+                with patch.object(self.cluster, "retain_image"), \
+                        patch.object(self.cluster, "resources"), \
+                        patch.object(self.cluster, "subnet_check"), \
+                        patch.object(self.cluster, "helper"), \
+                        patch.object(self.cluster, "compose"), \
+                        patch.object(self.cluster, "wait"), \
+                        patch.object(self.cluster, "establish_baseline") as baseline:
+                    self.cluster.up(900)
+                baseline.assert_not_called()
+                self.assertEqual(self.cluster.state["baseline"], journal)
 
     def test_status_executes_probe_in_the_existing_container(self):
         containers = [{
@@ -284,6 +310,38 @@ class OneboxTests(unittest.TestCase):
             "172.30.91.11", "172.30.91.11:19082", "172.30.91.11:19084",
             "172.30.91.11:19086", "172.30.91.11:19088",
         })
+
+    def test_bootstrap_upgrade_placeholder_does_not_block_onebox_readiness(self):
+        def get(address, path, deadline):
+            if path == "/$/GetUpgradeProgress":
+                return {
+                    "UpgradeState": "RollingForwardCompleted", "CodeVersion": "0.0.0.0",
+                    "ConfigVersion": "", "RollingUpgradeMode": "Invalid",
+                }
+            return self.observations(address, path, deadline)
+
+        with patch.object(probe, "get", side_effect=get):
+            result = probe.snapshot(self.cluster.state, self.xml, baseline_required=False)
+            self.assertTrue(result["ready"], result["problems"])
+            self.assertTrue(all(gateway["baseline"] == "uninitialized"
+                                for gateway in result["gateways"].values()))
+            self.assertFalse(probe.snapshot(self.cluster.state, self.xml)["ready"])
+
+    def test_no_baseline_does_not_bypass_node_version_or_health_checks(self):
+        def get(address, path, deadline):
+            result = self.observations(address, path, deadline)
+            if path == "/Nodes":
+                result["Items"][0].update(changes)
+            return result
+
+        for changes in (
+            {"CodeVersion": "0.0.0.0"}, {"ConfigVersion": "other"},
+            {"NodeStatus": "Down"}, {"HealthState": "Warning"},
+        ):
+            with self.subTest(changes=changes), patch.object(probe, "get", side_effect=get):
+                self.assertFalse(probe.snapshot(
+                    self.cluster.state, self.xml, baseline_required=False,
+                )["ready"])
 
     def test_one_unreachable_native_gateway_fails_readiness(self):
         def get(address, path, deadline):

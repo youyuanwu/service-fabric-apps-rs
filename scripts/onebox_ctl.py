@@ -64,6 +64,7 @@ class Onebox(ctl.Cluster):
     image_label = "io.github.service-fabric-apps.onebox"
     services = ("onebox",)
     admin_service = "onebox"
+    requires_baseline = False
     generate = staticmethod(generate)
     definition = staticmethod(definition)
 

@@ -165,6 +165,7 @@ class Cluster:
     image_label = IMAGE_LABEL
     services = NODES
     admin_service = "tools"
+    requires_baseline = True
     generate = staticmethod(generate)
     definition = staticmethod(definition)
 
@@ -394,7 +395,9 @@ class Cluster:
     def sfctl(self, *arguments, timeout=180):
         return self.exec("sfctl", *arguments, timeout=timeout)
 
-    def probe(self, baseline_required=True):
+    def probe(self, baseline_required=None):
+        if baseline_required is None:
+            baseline_required = self.requires_baseline
         budget = self.remaining(45)
         observation = json.loads(self.exec(
             "python3", "/usr/local/lib/sf-node/cluster-probe.py",
@@ -498,9 +501,13 @@ class Cluster:
         self.event("startup")
         with self.tools():
             self.wait(False, stable=0)
-            self.establish_baseline()
-            self.wait(True)
-        self.save(phase="ready", baseline="complete")
+            if self.requires_baseline:
+                self.establish_baseline()
+                self.wait(True)
+        self.save(
+            phase="ready",
+            baseline="complete" if self.requires_baseline else self.state["baseline"],
+        )
         self.event("ready")
         return {"name": self.name, "project": self.project, "ready": True,
                 "nodes": [node["node_name"] for node in self.state["nodes"]],
