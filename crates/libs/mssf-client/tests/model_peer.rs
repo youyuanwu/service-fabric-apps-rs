@@ -1087,6 +1087,22 @@ mod node_queries {
             ));
             assert!(!client.is_closed());
         }
+        for query in [
+            NodeQueryDescription {
+                node_name: Some("x".repeat(100_000)),
+                ..Default::default()
+            },
+            NodeQueryDescription {
+                continuation_token: Some("x".repeat(100_000)),
+                ..Default::default()
+            },
+        ] {
+            assert!(matches!(
+                client.get_node_list(&query).await,
+                Err(Error::InvalidInput(_))
+            ));
+            assert!(!client.is_closed());
+        }
         for timeout in [Duration::ZERO, Duration::from_nanos(99), Duration::MAX] {
             assert!(matches!(
                 client

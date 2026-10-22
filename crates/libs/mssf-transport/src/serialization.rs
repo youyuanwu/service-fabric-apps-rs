@@ -170,6 +170,11 @@ impl Encoder {
     }
 
     pub fn string(&mut self, value: &str) -> Result<()> {
+        // At most three UTF-8 bytes per UTF-16 code unit. Reject oversized
+        // caller buffers before scanning them; encoding work stays bounded too.
+        if value.len() > MAX_STRING_UNITS * 3 {
+            return Err(Error::InvalidInput("string code-unit limit exceeded"));
+        }
         let count = value.encode_utf16().count();
         if count > MAX_STRING_UNITS {
             return Err(Error::InvalidInput("string code-unit limit exceeded"));

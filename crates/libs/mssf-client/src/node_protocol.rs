@@ -6,13 +6,13 @@ use mssf_transport::{
 use crate::{nodes::*, Error, Result};
 
 pub(crate) fn encode_query(query: &NodeQueryDescription) -> Result<Vec<u8>> {
-    let mut args = Vec::new();
+    let mut args: Vec<(&str, Cow<'_, str>)> = Vec::new();
     if let Some(token) = query
         .continuation_token
         .as_deref()
         .filter(|s| !s.is_empty())
     {
-        args.push(("ContinuationToken", token.to_owned()));
+        args.push(("ContinuationToken", Cow::Borrowed(token)));
     }
     if let Some(max) = query.max_results {
         if max.get() > i64::MAX as u64 {
@@ -20,13 +20,16 @@ pub(crate) fn encode_query(query: &NodeQueryDescription) -> Result<Vec<u8>> {
                 "MaxResults exceeds native signed range",
             ));
         }
-        args.push(("MaxResults", max.to_string()));
+        args.push(("MaxResults", Cow::Owned(max.to_string())));
     }
     if let Some(name) = query.node_name.as_deref().filter(|s| !s.is_empty()) {
-        args.push(("NodeName", name.to_owned()));
+        args.push(("NodeName", Cow::Borrowed(name)));
     }
     if query.status_filter != NodeStatusFilter::DEFAULT {
-        args.push(("NodeStatusFilter", query.status_filter.bits().to_string()));
+        args.push((
+            "NodeStatusFilter",
+            Cow::Owned(query.status_filter.bits().to_string()),
+        ));
     }
     let mut encoder = Encoder::new();
     encoder.object(|encoder| {
@@ -186,3 +189,4 @@ fn decode_node(decoder: &mut Decoder<'_>) -> Result<Node> {
         http_gateway_port: decoder.u16()?,
     })
 }
+use std::borrow::Cow;
