@@ -291,3 +291,129 @@ fn service(decoder: &mut Decoder<'_>) -> Result<Service> {
         is_service_group,
     })
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use mssf_transport::serialization::Encoder;
+
+    fn application_base(e: &mut Encoder) -> Result<()> {
+        uri(e)?;
+        e.string("Type")?;
+        e.string("1")?;
+        e.i64(1);
+        e.i64(1);
+        empty_map(e)
+    }
+
+    fn service_base(e: &mut Encoder) -> Result<()> {
+        e.i64(1);
+        uri(e)?;
+        e.string("Type")?;
+        e.string("1")?;
+        e.boolean(false);
+        e.i64(1);
+        Ok(())
+    }
+
+    fn uri(e: &mut Encoder) -> Result<()> {
+        e.object(|e| {
+            e.i64(1);
+            e.string("fabric")?;
+            e.string("")?;
+            e.i64(0);
+            e.string("")?;
+            e.i32(-1);
+            e.string("/App")?;
+            e.string("")?;
+            e.string("")?;
+            e.u32(1);
+            e.string("App")
+        })
+    }
+
+    fn empty_map(e: &mut Encoder) -> Result<()> {
+        e.object_array::<()>(&[], |_, _| Ok(()))
+    }
+
+    #[test]
+    fn optional_suffix_wrong_metadata_is_not_absence_at_valid_record_extent() {
+        for position in 0..3 {
+            let mut e = Encoder::new();
+            e.object(|e| {
+                application_base(e)?;
+                if position >= 1 {
+                    e.string("")?;
+                }
+                if position >= 2 {
+                    empty_map(e)?;
+                }
+                // Wrong metadata at upgrade version/map/definition respectively.
+                e.boolean(false);
+                Ok(())
+            })
+            .unwrap();
+            let bytes = e.finish();
+            assert!(matches!(
+                Decoder::new(&bytes).object(application),
+                Err(Error::Protocol(_))
+            ));
+        }
+        for position in 0..2 {
+            let mut e = Encoder::new();
+            e.object(|e| {
+                service_base(e)?;
+                if position == 1 {
+                    e.i64(1);
+                }
+                e.string("wrong status/group metadata")
+            })
+            .unwrap();
+            let bytes = e.finish();
+            assert!(matches!(
+                Decoder::new(&bytes).object(service),
+                Err(Error::Protocol(_))
+            ));
+        }
+    }
+
+    #[test]
+    fn nonempty_deprecated_upgrade_parameter_map_is_explicitly_unsupported() {
+        let mut e = Encoder::new();
+        e.object(|e| {
+            application_base(e)?;
+            e.string("")?;
+            e.object_array(&[()], |e, _| {
+                e.string("upgrade")?;
+                e.string("value")
+            })
+        })
+        .unwrap();
+        assert!(matches!(
+            Decoder::new(&e.finish()).object(application),
+            Err(Error::Protocol(
+                "nonempty deprecated application upgrade parameters"
+            ))
+        ));
+    }
+
+    #[test]
+    fn truncated_optional_string_with_valid_record_extent_is_not_an_absent_suffix() {
+        let mut e = Encoder::new();
+        e.object(|e| {
+            application_base(e)?;
+            e.string("tail")
+        })
+        .unwrap();
+        let mut bytes = e.finish();
+        // Keep the record header and all enclosing extents valid. Only the
+        // trailing string's advertised unit count exceeds its remaining payload.
+        let count = bytes.len() - 11;
+        assert_eq!(bytes[count - 1], 0x8d);
+        bytes[count] = 20;
+        assert!(matches!(
+            Decoder::new(&bytes).object(application),
+            Err(Error::Protocol(_))
+        ));
+    }
+}
