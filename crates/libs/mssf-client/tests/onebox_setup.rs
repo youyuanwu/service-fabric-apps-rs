@@ -56,6 +56,10 @@ async fn onebox_prepare_fixtures() -> Result<()> {
     if report_path.exists() {
         std::fs::remove_file(&report_path)?;
     }
+    // A failed rerun must not leave an older successful observation usable.
+    if config_path.exists() {
+        std::fs::remove_file(&config_path)?;
+    }
     let client = Client::builder()
         .no_proxy()
         .redirect(Policy::none())
