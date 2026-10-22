@@ -289,7 +289,7 @@ print("stopped", flush=True)
     def test_auxiliary_shutdown_remains_bounded_and_reports_forced_termination(self):
         process = Mock()
         process.poll.return_value = None
-        process.wait.side_effect = [subprocess.TimeoutExpired("lttng-sessiond", 20), 0]
+        process.wait.side_effect = [subprocess.TimeoutExpired("lttng-sessiond", 30), 0]
         with patch("sys.stderr") as stderr:
             self.assertFalse(self.node.stop_process(process, name="LTTng session daemon"))
         process.send_signal.assert_called_once_with(signal.SIGTERM)

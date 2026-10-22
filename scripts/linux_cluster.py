@@ -12,7 +12,7 @@ import sys
 
 
 TEMPLATE = Path(__file__).resolve().parents[1] / "docker/linux-cluster/ClusterManifest.template.xml"
-SHUTDOWN_TIMEOUT = 120
+SHUTDOWN_TIMEOUT = 150
 
 
 def check_subnet(subnet, occupied):
