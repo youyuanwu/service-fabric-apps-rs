@@ -134,6 +134,8 @@ impl Journal {
             file.write_all(&serde_json::to_vec_pretty(self)?)?;
             file.sync_all()?;
             std::fs::rename(&temporary, path)?;
+            // Windows cannot open directories as files; retain POSIX rename durability.
+            #[cfg(unix)]
             std::fs::File::open(path.parent().ok_or("journal has no parent")?)?.sync_all()?;
             Ok(())
         })();
@@ -301,6 +303,31 @@ mod tests {
         let journal = Journal::new("test-owner".into(), "a".repeat(64)).unwrap();
         journal.reserve(path).unwrap();
         journal
+    }
+
+    #[test]
+    fn journal_transitions_replace_the_existing_file_and_survive_reload() {
+        let dir = Directory::new();
+        let path = dir.path();
+        let journal = reserved(&path);
+        let name = journal.name.clone();
+        drop(journal);
+        for stage in [
+            Stage::Absent,
+            Stage::Pending,
+            Stage::Settled,
+            Stage::Pending,
+            Stage::Settled,
+        ] {
+            let mut journal = Journal::load(&path, "test-owner").unwrap();
+            journal.record(&path, stage).unwrap();
+            drop(journal);
+            let saved = Journal::load(&path, "test-owner").unwrap();
+            assert_eq!(saved.stage, stage);
+            assert_eq!(saved.name, name);
+            assert_eq!(saved.archive_sha256, "a".repeat(64));
+            assert_eq!(std::fs::read_dir(&dir.0).unwrap().count(), 1);
+        }
     }
 
     #[tokio::test]
