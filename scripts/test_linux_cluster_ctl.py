@@ -94,6 +94,16 @@ class LifecycleTests(unittest.TestCase):
         ctl.write_json(self.directory / "compose.json", compose)
         self.cluster.save()
         self.cluster.load()
+        with patch.object(self.cluster, "resources", return_value=([], [], [])), \
+                patch.object(self.cluster, "compose") as execute:
+            self.cluster.down()
+        self.assertEqual([call.args for call in execute.call_args_list],
+                         [("stop", "--timeout", "45"), ("down", "--timeout", "45")])
+        with patch.object(self.cluster, "resources", return_value=([], [], [])), \
+                patch.object(self.cluster, "image_tag_id", return_value=""), \
+                patch.object(self.cluster, "compose") as execute:
+            self.cluster.destroy("test")
+        execute.assert_called_once_with("down", "--timeout", "45")
 
     def test_compose_command_deadline_exceeds_container_shutdown_deadline(self):
         with patch.object(ctl, "run") as run:

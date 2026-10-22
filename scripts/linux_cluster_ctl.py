@@ -502,7 +502,7 @@ class Cluster:
         self.compose("up", "-d", "--no-build", "--pull", "never", *self.services)
         if restart_nodes:
             self.event("explicit-node-restart", nodes=list(restart_nodes))
-            self.compose("restart", "--timeout", str(SHUTDOWN_TIMEOUT), *restart_nodes)
+            self.compose("restart", "--timeout", str(self.state.get("shutdown_timeout", 45)), *restart_nodes)
         self.event("startup")
         with self.tools():
             self.wait(False, stable=0)
@@ -543,14 +543,14 @@ class Cluster:
         if self.state["phase"] == "destroying":
             raise ValueError("Destroy is incomplete; repeat destroy, not down")
         self.resources(require_volumes=self.state["phase"] != "allocating")
-        self.compose("stop", "--timeout", str(SHUTDOWN_TIMEOUT))
+        self.compose("stop", "--timeout", str(self.state.get("shutdown_timeout", 45)))
         containers, _, _ = self.resources(require_volumes=self.state["phase"] != "allocating")
         exits = {
             container["Config"]["Labels"]["com.docker.compose.service"]: container["State"]["ExitCode"]
             for container in containers
             if container["Config"]["Labels"]["com.docker.compose.service"] in self.services
         }
-        self.compose("down", "--timeout", str(SHUTDOWN_TIMEOUT))
+        self.compose("down", "--timeout", str(self.state.get("shutdown_timeout", 45)))
         # Preserve allocating so up can finish an interrupted initial allocation.
         if self.state["phase"] != "allocating":
             self.save(phase="down")
@@ -568,7 +568,7 @@ class Cluster:
             _, volumes, _ = self.resources(require_volumes=False)
             retained_image = self.image_tag_id()
             self.save(phase="destroying")
-            self.compose("down", "--timeout", str(SHUTDOWN_TIMEOUT))
+            self.compose("down", "--timeout", str(self.state.get("shutdown_timeout", 45)))
             for volume in volumes:
                 run(["docker", "volume", "rm", volume["Name"]])
             if retained_image:

@@ -108,6 +108,11 @@ class OneboxTests(unittest.TestCase):
         ctl.write_json(self.directory / "compose.json", compose)
         self.cluster.save()
         self.cluster.load()
+        with patch.object(self.cluster, "resources", return_value=([], [], [])), \
+                patch.object(self.cluster, "compose") as execute:
+            self.cluster.down()
+        self.assertEqual([call.args for call in execute.call_args_list],
+                         [("stop", "--timeout", "45"), ("down", "--timeout", "45")])
 
     def test_credentials_are_generated_once_and_retained(self):
         state = self.cluster.state
