@@ -1,6 +1,7 @@
-//! Native-only consumers of previously established independent health observations.
+//! Self-contained health scenario with independent management setup and native assertions.
 use std::{
     future::{poll_fn, Future},
+    path::PathBuf,
     task::Poll,
     time::Duration,
 };
@@ -15,6 +16,11 @@ use tokio::task::JoinSet;
 #[path = "support/health_oracle.rs"]
 mod oracle;
 use oracle::*;
+
+#[path = "support/fixture.rs"]
+mod fixture;
+#[path = "support/health_setup.rs"]
+mod setup;
 
 fn state(value: &str) -> HealthState {
     match value {
@@ -223,8 +229,21 @@ fn assert_independent_fixture(config: &Config) {
 }
 
 #[tokio::test]
-#[ignore = "native TCP consumer; requires fresh explicit independent onebox_prepare_health"]
+#[ignore = "prepares and restores an owned health report on a disposable onebox; requires MSSF_HEALTH_* and archive hash"]
 async fn onebox_native_node_health() -> Result<()> {
+    let (path, report) = fixture::with_cleanup(
+        async {
+            setup::prepare().await?;
+            assert_native_node_health().await
+        },
+        setup::restore_owned(),
+    )
+    .await?;
+    std::fs::write(path, serde_json::to_vec_pretty(&report)?)?;
+    Ok(())
+}
+
+async fn assert_native_node_health() -> Result<(PathBuf, Value)> {
     let config_path = output("MSSF_HEALTH_CONFIG")?;
     let config: Config = serde_json::from_slice(&std::fs::read(&config_path)?)?;
     config.validate_ready()?;
@@ -336,8 +355,7 @@ async fn onebox_native_node_health() -> Result<()> {
         "final_healthy_reuse": health_evidence(&final_health),
         "completed_at_unix_ms": now_ms(),
     });
-    std::fs::write(config.report_path, serde_json::to_vec_pretty(&report)?)?;
-    Ok(())
+    Ok((config.report_path, report))
 }
 
 #[test]

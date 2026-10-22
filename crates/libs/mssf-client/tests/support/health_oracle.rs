@@ -1,5 +1,5 @@
 //! Test-only management observations. Never used by the production client.
-#![allow(dead_code)] // Shared by preparation and native-only integration binaries.
+#![allow(dead_code)] // Shared by independent preparation and native assertions.
 
 use std::{error::Error, path::PathBuf};
 
@@ -91,7 +91,9 @@ impl Config {
             || self.missing_http_code != "FABRIC_E_HEALTH_ENTITY_NOT_FOUND"
             || self.snapshots.len() != cases().len()
         {
-            return Err("health observations incomplete/stale; rerun explicit preparation".into());
+            return Err(
+                "health observations incomplete/stale; rerun the onebox health test".into(),
+            );
         }
         for (snapshot, (label, healthy, policy, filter)) in self.snapshots.iter().zip(cases()) {
             if snapshot.label != label

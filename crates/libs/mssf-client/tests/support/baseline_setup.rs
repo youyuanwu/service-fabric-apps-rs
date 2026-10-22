@@ -5,7 +5,7 @@ use std::{error::Error, path::PathBuf, time::Duration};
 use reqwest::{redirect::Policy, Client, Response, StatusCode};
 use serde::Deserialize;
 
-mod support;
+use super::support;
 use support::ObservedNode;
 
 const MANAGEMENT: &str = "http://127.0.0.1:19080";
@@ -45,9 +45,7 @@ fn successful(response: Response) -> Result<Response> {
     Ok(response)
 }
 
-#[tokio::test]
-#[ignore = "creates fixtures on a fresh disposable local onebox; requires MSSF_TEST_CONFIG and MSSF_TEST_REPORT"]
-async fn onebox_prepare_fixtures() -> Result<()> {
+pub async fn prepare() -> Result<()> {
     let config_path = output_from_env("MSSF_TEST_CONFIG")?;
     let report_path = output_from_env("MSSF_TEST_REPORT")?;
     if config_path == report_path {
@@ -123,7 +121,11 @@ async fn onebox_prepare_fixtures() -> Result<()> {
     if !token.is_empty() {
         return Err("management paging exceeded test bound".into());
     }
-    if items.len() != 5 || items.iter().any(|node| node.node_status != "Up") {
+    if items.len() != 5
+        || items
+            .iter()
+            .any(|node| node.node_status != "Up" || node.health_state != "Ok")
+    {
         return Err("qualification requires the healthy five-logical-node onebox profile".into());
     }
     let node = items

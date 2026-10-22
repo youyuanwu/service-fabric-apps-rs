@@ -202,17 +202,6 @@ jobs:
     - name: Check fresh cluster health
       run: python3 "$CLUSTER_CTL" status "$CLUSTER_NAME" > "$RUNNER_TEMP/linux-cluster-status-created.json"
 
-    - name: Prepare onebox test data and expected results
-      if: matrix.topology == 'onebox'
-      run: |
-        cargo-nextest nextest run \
-          --archive-file "$RUNNER_TEMP/native-client-tests/native-client-tests.tar.zst" \
-          --workspace-remap "$GITHUB_WORKSPACE" \
-          --run-ignored all -E 'group(onebox) & test(=onebox_prepare_fixtures)' --no-tests fail
-      env:
-        MSSF_TEST_CONFIG: ${{ runner.temp }}/native-client-config.json
-        MSSF_TEST_REPORT: ${{ runner.temp }}/native-client-report.json
-
     - name: Exercise real native ping, NameExists, node list and health
       id: native_client
       if: matrix.topology == 'onebox'
@@ -221,31 +210,12 @@ jobs:
         cargo-nextest nextest run \
           --archive-file "$RUNNER_TEMP/native-client-tests/native-client-tests.tar.zst" \
           --workspace-remap "$GITHUB_WORKSPACE" \
-          --run-ignored all -E 'group(onebox) & test(=onebox_ping_name_exists_and_node_list)' --no-tests fail
-        # Shared-group serialization is not setup ordering: prepare explicitly.
-        cargo-nextest nextest run \
-          --archive-file "$RUNNER_TEMP/native-client-tests/native-client-tests.tar.zst" \
-          --workspace-remap "$GITHUB_WORKSPACE" \
-          --run-ignored all -E 'group(onebox) & test(=onebox_prepare_health)' --no-tests fail
-        cargo-nextest nextest run \
-          --archive-file "$RUNNER_TEMP/native-client-tests/native-client-tests.tar.zst" \
-          --workspace-remap "$GITHUB_WORKSPACE" \
-          --run-ignored all -E 'group(onebox) & test(=onebox_native_node_health)' --no-tests fail
+          --run-ignored all -E 'group(onebox)' --no-tests fail
       env:
         MSSF_TEST_CONFIG: ${{ runner.temp }}/native-client-config.json
+        MSSF_TEST_REPORT: ${{ runner.temp }}/native-client-report.json
         MSSF_HEALTH_CONFIG: ${{ runner.temp }}/native-health-config.json
         MSSF_HEALTH_REPORT: ${{ runner.temp }}/native-health-report.json
-        MSSF_HEALTH_OWNER: ci-${{ github.run_id }}-${{ github.run_attempt }}
-
-    - name: Restore only owned health report
-      if: always() && matrix.topology == 'onebox'
-      run: |
-        cargo-nextest nextest run \
-          --archive-file "$RUNNER_TEMP/native-client-tests/native-client-tests.tar.zst" \
-          --workspace-remap "$GITHUB_WORKSPACE" \
-          --run-ignored all -E 'group(onebox) & test(=onebox_restore_health)' --no-tests fail
-      env:
-        MSSF_HEALTH_CONFIG: ${{ runner.temp }}/native-health-config.json
         MSSF_HEALTH_OWNER: ci-${{ github.run_id }}-${{ github.run_attempt }}
 
     - name: Upload successful native client evidence

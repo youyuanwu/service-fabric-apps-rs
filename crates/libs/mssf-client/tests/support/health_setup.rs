@@ -1,12 +1,10 @@
-//! Independent HTTP-only setup/restoration; explicitly run before/after native consumers.
+//! Independent HTTP-only preparation and owned-report restoration helpers.
 use std::time::Duration;
 
 use reqwest::{redirect::Policy, Client};
 use serde_json::json;
 
-#[path = "support/health_oracle.rs"]
-mod oracle;
-use oracle::*;
+use super::oracle::*;
 
 fn management() -> Result<Client> {
     Ok(Client::builder()
@@ -71,16 +69,29 @@ async fn restore(client: &Client, config: &Config) -> Result<()> {
             .iter()
             .any(|e| e.source_id == config.source && e.property == config.property);
         if health.aggregated_health_state == "Ok" && !owned {
-            return Ok(());
+            let nodes: serde_json::Value = client
+                .get(format!("{MANAGEMENT}/Nodes?api-version=6.3"))
+                .send()
+                .await?
+                .error_for_status()?
+                .json()
+                .await?;
+            let items = nodes["Items"]
+                .as_array()
+                .ok_or("missing management node list during restoration")?;
+            if items
+                .iter()
+                .any(|node| node["Name"] == config.target && node["HealthState"] == "Ok")
+            {
+                return Ok(());
+            }
         }
         tokio::time::sleep(Duration::from_secs(1)).await;
     }
     Err("owned report did not expire/remove after restoration".into())
 }
 
-#[tokio::test]
-#[ignore = "independently injects an owned warning on an explicitly disposable onebox; requires MSSF_HEALTH_* and archive hash"]
-async fn onebox_prepare_health() -> Result<()> {
+pub async fn prepare() -> Result<()> {
     let path = output("MSSF_HEALTH_CONFIG")?;
     let report_path = output("MSSF_HEALTH_REPORT")?;
     if path == report_path {
@@ -224,9 +235,7 @@ async fn onebox_prepare_health() -> Result<()> {
     Ok(())
 }
 
-#[tokio::test]
-#[ignore = "restores only the explicitly owned report from MSSF_HEALTH_CONFIG"]
-async fn onebox_restore_health() -> Result<()> {
+pub async fn restore_owned() -> Result<()> {
     let path = output("MSSF_HEALTH_CONFIG")?;
     if !path.exists() {
         return Ok(());
