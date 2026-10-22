@@ -41,6 +41,7 @@ macro_rules! native_enum {
                     other => Self::Unrecognized(other),
                 }
             }
+            /// Return the native signed value, including unrecognized values.
             pub fn as_raw(self) -> i64 {
                 match self {
                     $(Self::$variant => $value,)*
@@ -51,27 +52,45 @@ macro_rules! native_enum {
     };
 }
 
-native_enum!(NodeStatus {
-    Invalid = 0, Up = 1, Down = 2, Enabling = 3, Disabling = 4,
-    Disabled = 5, Unknown = 6, Removed = 7,
-});
-native_enum!(HealthState {
-    Invalid = 0, Ok = 1, Warning = 2, Error = 3, Unknown = 65535,
-});
-native_enum!(NodeDeactivationIntent {
-    Invalid = 0, Pause = 1, Restart = 2, RemoveData = 3, RemoveNode = 4,
-});
-native_enum!(NodeDeactivationStatus {
-    None = 0, SafetyCheckInProgress = 1, SafetyCheckComplete = 2, Completed = 3,
-});
-native_enum!(NodeDeactivationTaskType {
-    Invalid = 0, Infrastructure = 1, Repair = 2, Client = 3,
-});
-native_enum!(SafetyCheckKind {
-    Invalid = 0, EnsureSeedNodeQuorum = 1, EnsurePartitionQuorum = 2,
-    WaitForPrimaryPlacement = 3, WaitForPrimarySwap = 4,
-    WaitForReconfiguration = 5, WaitForInBuildReplica = 6, EnsureAvailability = 7,
-});
+native_enum!(
+    /// Native node state, distinct from the bits in [`NodeStatusFilter`].
+    NodeStatus {
+        Invalid = 0, Up = 1, Down = 2, Enabling = 3, Disabling = 4,
+        Disabled = 5, Unknown = 6, Removed = 7,
+    }
+);
+native_enum!(
+    /// Native health assessment; `Unknown` is a named value, not a fallback.
+    HealthState {
+        Invalid = 0, Ok = 1, Warning = 2, Error = 3, Unknown = 65535,
+    }
+);
+native_enum!(
+    /// Requested or effective action for native node deactivation.
+    NodeDeactivationIntent {
+        Invalid = 0, Pause = 1, Restart = 2, RemoveData = 3, RemoveNode = 4,
+    }
+);
+native_enum!(
+    /// Progress of the node's native deactivation safety checks and action.
+    NodeDeactivationStatus {
+        None = 0, SafetyCheckInProgress = 1, SafetyCheckComplete = 2, Completed = 3,
+    }
+);
+native_enum!(
+    /// Native subsystem that owns a node deactivation task.
+    NodeDeactivationTaskType {
+        Invalid = 0, Infrastructure = 1, Repair = 2, Client = 3,
+    }
+);
+native_enum!(
+    /// Native safety-check discriminant; unknown structural kinds fail decoding.
+    SafetyCheckKind {
+        Invalid = 0, EnsureSeedNodeQuorum = 1, EnsurePartitionQuorum = 2,
+        WaitForPrimaryPlacement = 3, WaitForPrimarySwap = 4,
+        WaitForReconfiguration = 5, WaitForInBuildReplica = 6, EnsureAvailability = 7,
+    }
+);
 
 /// Native filter bits, distinct from `NodeStatus` discriminants.
 ///
@@ -96,6 +115,7 @@ impl NodeStatusFilter {
         Self(bits)
     }
 
+    /// Return the unchanged native filter bitmask.
     pub const fn bits(self) -> u32 {
         self.0
     }
@@ -131,6 +151,10 @@ pub struct NodeListPage {
     pub continuation_token: Option<String>,
 }
 
+/// Owned native node record, including deactivation and raw timing fields.
+///
+/// Aggregation can include CM-only records with native default/unknown values;
+/// this type does not infer missing observations from other fields.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Node {
     pub name: String,
@@ -155,6 +179,7 @@ pub struct Node {
     pub http_gateway_port: u16,
 }
 
+/// Native effective deactivation state with its tasks and pending safety checks.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct NodeDeactivation {
     pub effective_intent: NodeDeactivationIntent,
@@ -163,6 +188,7 @@ pub struct NodeDeactivation {
     pub pending_safety_checks: Vec<SafetyCheck>,
 }
 
+/// An owned deactivation task, flattening the native task-ID object.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct NodeDeactivationTask {
     pub id: String,

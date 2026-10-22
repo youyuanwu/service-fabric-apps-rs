@@ -134,6 +134,7 @@ impl Encoder {
         Ok(())
     }
 
+    /// Encode a native compressed UInt16, including its scalar metadata.
     pub fn u16(&mut self, value: u16) {
         self.unsigned(UINT16, u64::from(value));
     }
@@ -302,6 +303,8 @@ impl<'a> Decoder<'a> {
         self.expect(SCOPE_BEGIN)
     }
 
+    /// Read a nullable native object pointer, exposing nonnull type information.
+    /// The callback is not invoked for a null pointer.
     pub fn pointer<T>(
         &mut self,
         f: impl FnOnce(&mut Self, &'a [u8]) -> Result<T>,
@@ -313,6 +316,8 @@ impl<'a> Decoder<'a> {
         }
     }
 
+    /// Read complete serializable objects using the callback for each first scope.
+    /// Validate the count and minimum enclosing extent before allocating values.
     pub fn object_array<T>(&mut self, mut f: impl FnMut(&mut Self) -> Result<T>) -> Result<Vec<T>> {
         let count = self.object_array_count()?;
         let mut values = Vec::new();
@@ -337,6 +342,7 @@ impl<'a> Decoder<'a> {
         }
     }
 
+    /// Read a native compressed UInt16, rejecting wrong metadata and overflow.
     pub fn u16(&mut self) -> Result<u16> {
         self.unsigned(UINT16, 16).map(|value| value as u16)
     }
