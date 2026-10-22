@@ -53,6 +53,9 @@ async fn onebox_prepare_fixtures() -> Result<()> {
     if config_path == report_path {
         return Err("configuration and report paths must differ".into());
     }
+    if report_path.exists() {
+        std::fs::remove_file(&report_path)?;
+    }
     let client = Client::builder()
         .no_proxy()
         .redirect(Policy::none())

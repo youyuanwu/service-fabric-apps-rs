@@ -198,12 +198,29 @@ fn assert_membership(page: &NodeListPage, config: &Config) {
     }
 }
 
+fn native_timing_evidence(nodes: &[Node]) -> serde_json::Value {
+    nodes
+        .iter()
+        .map(|node| {
+            serde_json::json!({
+                "name": node.name, "id": node.id.to_string(),
+                "up_time_seconds": node.up_time_seconds,
+                "down_time_seconds": node.down_time_seconds,
+                "up_at_native_ticks": node.up_at.0,
+                "down_at_native_ticks": node.down_at.0,
+            })
+        })
+        .collect()
+}
+
 async fn assert_node_queries(client: &FabricClient, config: &Config) -> serde_json::Value {
     assert_fresh(config);
+    let native_observation_start_unix_ms = support::unix_millis();
     let baseline = client
         .get_node_list(&NodeQueryDescription::default())
         .await
         .expect("native GetNodeList");
+    let native_observation_end_unix_ms = support::unix_millis();
     assert_membership(&baseline, config);
     for filter in [
         NodeStatusFilter::DEFAULT,
@@ -333,10 +350,17 @@ async fn assert_node_queries(client: &FabricClient, config: &Config) -> serde_js
         })
         .await
         .expect_err("malformed continuation must be a native error, not empty success");
-    let mssf_client::Error::Remote { code, .. } = invalid else {
+    let mssf_client::Error::Remote { code, message } = invalid else {
         panic!("expected native error, got {invalid:?}");
     };
-    assert_eq!(code, -2147024809, "native E_INVALIDARG");
+    // On this runtime all invalid-token subqueries can fail, and the parallel
+    // handler returns the last failure (QueryMessageHandler.cpp:212-225). Real
+    // native AND independent HTTP probes observed both E_INVALIDARG and
+    // FMFailoverUnitNotFound. Do not normalize either or retry the operation.
+    assert!(
+        [-2147024809, -2147017462].contains(&code),
+        "unexpected native malformed-token error {code}: {message}"
+    );
     assert!(
         !client.is_closed(),
         "complete native fault must not poison the stream"
@@ -389,6 +413,9 @@ async fn assert_node_queries(client: &FabricClient, config: &Config) -> serde_js
     serde_json::json!({
         "native_node_count": baseline.nodes.len(), "independent_nodes": config.expected_nodes,
         "observation_unix_ms": config.observed_at_unix_ms,
+        "native_observation_start_unix_ms": native_observation_start_unix_ms,
+        "native_observation_end_unix_ms": native_observation_end_unix_ms,
+        "native_timings": native_timing_evidence(&baseline.nodes),
         "typed_stable_fields_match": true, "timing_tolerance_seconds": 120,
         "timestamp_precision_tolerance_ticks": 10000,
         "binary_ports_match_onebox_manifest": true,
@@ -396,6 +423,7 @@ async fn assert_node_queries(client: &FabricClient, config: &Config) -> serde_js
         "empty_name_token_omitted": true, "paging_chains": chains,
         "valid_continuation_after_final_id_is_empty": true,
         "invalid_token_native_code": code, "connection_survives_native_error": true,
+        "invalid_token_native_diagnostic": message,
         "success_headers": headers,
         "limits": "healthy five logical nodes, one host; empty deactivation only; no snapshot/partial-failure qualification"
     })
@@ -678,6 +706,48 @@ fn native_timestamp_oracle_preserves_epoch_and_millisecond_precision() {
         assert_native_time(134_371_187_016_300_000, "2026-10-22T04:58:21.628Z");
     })
     .is_err());
+}
+
+#[test]
+fn evidence_retains_native_timing_values_without_precision_loss() {
+    use mssf_client::{NodeDeactivation, NodeId, NodeTimestamp};
+    let node = Node {
+        name: "N0010".into(),
+        id: NodeId { high: 1, low: 2 },
+        ip_address_or_fqdn: "127.0.0.1".into(),
+        node_type: "type".into(),
+        code_version: "version".into(),
+        config_version: "1".into(),
+        status: NodeStatus::Up,
+        up_time_seconds: 123,
+        health_state: HealthState::Ok,
+        is_seed_node: true,
+        upgrade_domain: "UD0".into(),
+        fault_domain: "fd:/n".into(),
+        instance_id: 42,
+        cluster_connection_port: 19002,
+        deactivation: NodeDeactivation {
+            effective_intent: NodeDeactivationIntent::Invalid,
+            status: NodeDeactivationStatus::None,
+            tasks: vec![],
+            pending_safety_checks: vec![],
+        },
+        is_stopped: false,
+        down_time_seconds: 456,
+        up_at: NodeTimestamp(134_371_187_016_284_610),
+        down_at: NodeTimestamp(0),
+        http_gateway_port: 19080,
+    };
+    let evidence = native_timing_evidence(&[node]);
+    assert_eq!(evidence[0]["name"], "N0010");
+    assert_eq!(evidence[0]["id"], "10000000000000002");
+    assert_eq!(evidence[0]["up_time_seconds"].as_i64(), Some(123));
+    assert_eq!(evidence[0]["down_time_seconds"].as_i64(), Some(456));
+    assert_eq!(
+        evidence[0]["up_at_native_ticks"].as_i64(),
+        Some(134_371_187_016_284_610)
+    );
+    assert_eq!(evidence[0]["down_at_native_ticks"].as_i64(), Some(0));
 }
 
 #[cfg(test)]

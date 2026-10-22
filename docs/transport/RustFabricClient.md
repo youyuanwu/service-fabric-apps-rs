@@ -23,7 +23,7 @@ Neither uses HTTP to execute client operations. "Clear TCP" still carries the
 | Gateway ping | Sends PingRequest with an empty body and decodes gateway address, node ID, node instance, and node name. Full identity compared with independent onebox observations. |
 | NameExists | Sends a parsed ten-field native URI object; independently established existing/absent names returned true/false on the same connection. |
 | GetNodeList | Sends the external `GetNodeList` string query to NamingGateway using `QueryRequest`; decodes all 21 source-defined node fields, nested deactivation data and explicit paging. Five-node membership/overlapping fields independently checked through management; binary ports checked against the onebox manifest. |
-| Native faults/errors | Retains native signed error codes and available diagnostics. Malformed GetNodeList continuation produced live `E_INVALIDARG` (-2147024809) and the same connection remained usable; other fault forms have offline model-peer coverage. |
+| Native faults/errors | Retains native signed error codes and available diagnostics. Malformed GetNodeList continuation produced live `E_INVALIDARG` (-2147024809) or `FMFailoverUnitNotFound` (-2147017462); the same connection remained usable. Other fault forms have offline model-peer coverage. |
 | Concurrent operations | Mixed ping, NameExists and node queries on clones sharing one connection; real onebox coverage. |
 | Idle disconnect | Real native ping through a test-owned proxy, followed by proxy cutoff; closure detected without another operation. |
 | Controls and stream lifecycle | Idle ListenInstance, deadlines, fragmentation, backpressure, correlation, cancellation, and close/drop; offline model-peer coverage. |
@@ -354,6 +354,17 @@ continuation after the final independent ID were checked. Stable fields match
 exactly; duration observations allow at most 120 seconds of sequential skew,
 timestamps match management's millisecond precision (<10,000 ticks), and
 deactivation/health must match the stable healthy prerequisite.
+Reports retain independent management observations **and** native durations,
+raw timestamp ticks and native observation start/end times, not just pass flags.
+
+Malformed-token errors are runtime-dependent even on this healthy profile:
+independent HTTP probes also returned both E_INVALIDARG (400) and
+FMFailoverUnitNotFound (500). The native parallel-query handler returns the
+last error when every subquery fails
+([pinned source](https://github.com/microsoft/service-fabric/blob/3988b4518236d2d0a37f4d8bdcdf0a2093c5a61d/src/prod/src/query/QueryMessageHandler.cpp#L212-L225)).
+The qualification test accepts these two specifically observed native codes,
+records the actual code/diagnostic, and requires healthy queries before/after.
+The client neither normalizes this variability nor retries it.
 
 This does **not** qualify non-Up transitions, populated safety/deactivation
 states, partial aggregation failures, byte-size-limited paging, membership
