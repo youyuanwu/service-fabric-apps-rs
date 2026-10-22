@@ -173,10 +173,12 @@ native NamingUri parser.
 The queue is a count bound, not an aggregate memory limit of one frame: 32
 maximum-sized queued frames can occupy 128 MiB. Memory also includes active
 encoding and frame copies, one active writer, one incoming frame and decoded
-results. Admission is acquired before encoding and follows each result through
-delivery; queue capacity is reserved before encoding. Cancelled commands retain
-no admission but remain within the queue bound until discarded. Returned values
-and caller-created input buffers remain the caller's responsibility.
+results. Admission and queue capacity are acquired before transport frame
+encoding, and admission follows each result through delivery. Facade-prepared
+URI bodies and activity/version headers already exist before admission; waiting
+calls can own these bounded buffers. Cancelled commands retain no admission but
+remain within the queue bound until discarded. Returned values and caller-created
+input buffers remain the caller's responsibility.
 
 The decoder skips unknown/deleted header records by their bounded record
 lengths. Effective common headers use the last visible occurrence; first
