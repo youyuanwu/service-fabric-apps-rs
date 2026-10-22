@@ -100,6 +100,14 @@ the node's current deployment rather than running fresh `Create` again.
 `down` records each node's exit code before removing containers. A forced or
 failed shutdown is reported as an error even though teardown completes and all
 volumes remain available for recovery.
+The supervisor sends the first requested stop signal only once and allows
+FabricHost up to 90 seconds to stop, then LTTng up to 20 seconds. Compose allows
+120 seconds overall, with additional time for the controller command to finish.
+These are deadlines, not fixed sleeps: prompt shutdowns return immediately.
+An exceeded deadline still forces termination and fails `down`; it is not
+silently treated as a clean retained shutdown.
+Existing allocations keep their frozen image and original Compose grace period;
+rebuild the image and create a new allocation to use the updated supervisor.
 
 `destroy` leaves a small destroyed-state record and operation log. It can be
 repeated after an interrupted deletion; volumes still in use cause an explicit
