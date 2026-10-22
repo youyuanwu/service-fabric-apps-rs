@@ -25,6 +25,15 @@ async fn mutate(
     } else {
         client.create_name(&journal.name).await
     };
+    settle(journal, path, outcome, expected_error)
+}
+
+fn settle(
+    journal: &mut Journal,
+    path: &Path,
+    outcome: mssf_client::Result<()>,
+    expected_error: Option<i64>,
+) -> Result<Option<i64>> {
     // Unknown errors deliberately keep Pending, including timeout/cancel/disconnect.
     // Even an observed absence cannot prove an abandoned create will not commit later.
     match outcome {
@@ -37,11 +46,10 @@ async fn mutate(
             }
             Ok(None)
         }
-        Err(Error::Remote { code, .. }) if code == DUPLICATE || code == MISSING => {
+        Err(Error::Remote { code, .. })
+            if Some(code) == expected_error && (code == DUPLICATE || code == MISSING) =>
+        {
             journal.record(path, Stage::Settled)?;
-            if Some(code) != expected_error {
-                return Err(format!("unexpected native name error: {code}").into());
-            }
             Ok(Some(code))
         }
         Err(error) => Err(error.into()),
@@ -113,4 +121,82 @@ async fn onebox_native_name_lifecycle() -> Result<()> {
         serde_json::to_vec_pretty(&report)?,
     )?;
     Ok(())
+}
+
+#[test]
+fn only_conclusive_success_or_expected_native_rejections_settle_ownership() {
+    struct Directory(std::path::PathBuf);
+    impl Drop for Directory {
+        fn drop(&mut self) {
+            std::fs::remove_dir_all(&self.0).unwrap();
+        }
+    }
+    for (outcome, expected, settled, accepted) in [
+        (
+            Err(Error::Remote {
+                code: DUPLICATE,
+                message: "unexpected duplicate".into(),
+            }),
+            None,
+            false,
+            false,
+        ),
+        (
+            Err(Error::Remote {
+                code: MISSING,
+                message: "wrong rejection".into(),
+            }),
+            Some(DUPLICATE),
+            false,
+            false,
+        ),
+        (Err(Error::Timeout), None, false, false),
+        (
+            Err(Error::Protocol("malformed success")),
+            None,
+            false,
+            false,
+        ),
+        (
+            Err(Error::Remote {
+                code: DUPLICATE,
+                message: "expected duplicate".into(),
+            }),
+            Some(DUPLICATE),
+            true,
+            true,
+        ),
+        (
+            Err(Error::Remote {
+                code: MISSING,
+                message: "expected missing".into(),
+            }),
+            Some(MISSING),
+            true,
+            true,
+        ),
+        (Ok(()), None, true, true),
+        (Ok(()), Some(DUPLICATE), true, false),
+    ] {
+        let directory =
+            Directory(std::env::temp_dir().join(format!("name-outcome-{}", uuid::Uuid::new_v4())));
+        std::fs::create_dir(&directory.0).unwrap();
+        let path = directory.0.join("journal.json");
+        let mut journal = Journal::new("test-owner".into(), "a".repeat(64)).unwrap();
+        journal.reserve(&path).unwrap();
+        journal.record(&path, Stage::Absent).unwrap();
+        journal.record(&path, Stage::Pending).unwrap();
+        assert_eq!(
+            settle(&mut journal, &path, outcome, expected).is_ok(),
+            accepted
+        );
+        assert_eq!(
+            Journal::load(&path, "test-owner").unwrap().stage,
+            if settled {
+                Stage::Settled
+            } else {
+                Stage::Pending
+            },
+        );
+    }
 }
