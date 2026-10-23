@@ -3,6 +3,8 @@ use crate::serialization::{MAX_COLLECTION_COUNT, MAX_DEPTH, MAX_STRING_UNITS};
 use ::serde::ser::SerializeStruct;
 use std::{cell::Cell, fmt::Write};
 
+mod enums;
+
 #[derive(Debug, Serialize, Deserialize, PartialEq)]
 struct Row {
     text: String,
@@ -137,7 +139,7 @@ fn bitflags_unsupported_width_fails_explicitly() {
     assert!(matches!(from_slice::<Flags>(&[1]), Err(Error::Protocol(_))));
 }
 
-#[derive(Debug, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 struct Pair(u32, String);
 #[derive(Debug, Serialize, Deserialize, PartialEq)]
 struct Newtype(Pair);

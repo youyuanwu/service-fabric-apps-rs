@@ -1,6 +1,6 @@
 use mssf_transport::{
     message::Message,
-    serialization::serde::{ByteArray, Derived, Guid, NativeType, ObjectArray, Pointer, Typed},
+    serialization::serde::{ByteArray, Derived, Guid, NativeEnum, ObjectArray, Pointer},
 };
 use serde::{Deserialize, Serialize};
 
@@ -48,9 +48,9 @@ struct NodeWire {
     node_type: String,
     code_version: String,
     config_version: String,
-    status: i64,
+    status: NodeStatus,
     up_time_seconds: i64,
-    health_state: i64,
+    health_state: HealthState,
     is_seed_node: bool,
     upgrade_domain: String,
     fault_domain: String,
@@ -78,9 +78,9 @@ impl NodeWire {
             node_type: self.node_type,
             code_version: self.code_version,
             config_version: self.config_version,
-            status: NodeStatus::from_raw(self.status),
+            status: self.status,
             up_time_seconds: self.up_time_seconds,
-            health_state: HealthState::from_raw(self.health_state),
+            health_state: self.health_state,
             is_seed_node: self.is_seed_node,
             upgrade_domain: self.upgrade_domain,
             fault_domain: self.fault_domain,
@@ -97,25 +97,25 @@ impl NodeWire {
 }
 
 #[derive(Deserialize)]
-struct TaskId(String, i64);
+struct TaskId(String, NodeDeactivationTaskType);
 #[derive(Deserialize)]
-struct TaskWire(TaskId, i64);
+struct TaskWire(TaskId, NodeDeactivationIntent);
 #[derive(Deserialize)]
 struct SafetySlot {
-    value: Pointer<Typed<SafetyCheck>>,
+    value: Pointer<NativeEnum<SafetyWire>>,
 }
 #[derive(Deserialize)]
 struct DeactivationWire {
-    effective_intent: i64,
-    status: i64,
+    effective_intent: NodeDeactivationIntent,
+    status: NodeDeactivationStatus,
     tasks: ObjectArray<Vec<TaskWire>>,
     pending_safety_checks: ObjectArray<Vec<SafetySlot>>,
 }
 impl DeactivationWire {
     fn into_deactivation(self) -> Result<NodeDeactivation> {
         Ok(NodeDeactivation {
-            effective_intent: NodeDeactivationIntent::from_raw(self.effective_intent),
-            status: NodeDeactivationStatus::from_raw(self.status),
+            effective_intent: self.effective_intent,
+            status: self.status,
             tasks: self
                 .tasks
                 .0
@@ -123,8 +123,8 @@ impl DeactivationWire {
                 .map(
                     |TaskWire(TaskId(id, task_type), intent)| NodeDeactivationTask {
                         id,
-                        task_type: NodeDeactivationTaskType::from_raw(task_type),
-                        intent: NodeDeactivationIntent::from_raw(intent),
+                        task_type,
+                        intent,
                     },
                 )
                 .collect(),
@@ -137,7 +137,7 @@ impl DeactivationWire {
                          value: Pointer(value),
                      }| {
                         value
-                            .map(|Typed(value)| value)
+                            .map(|NativeEnum(value)| value.into())
                             .ok_or(Error::Protocol("null pending safety check"))
                     },
                 )
@@ -146,90 +146,60 @@ impl DeactivationWire {
     }
 }
 
-impl NativeType for SafetyCheck {
-    fn type_info(&self) -> mssf_transport::Result<&[u8]> {
-        const TAGS: [[u8; 4]; 8] = [
-            0i32.to_le_bytes(),
-            1i32.to_le_bytes(),
-            2i32.to_le_bytes(),
-            3i32.to_le_bytes(),
-            4i32.to_le_bytes(),
-            5i32.to_le_bytes(),
-            6i32.to_le_bytes(),
-            7i32.to_le_bytes(),
-        ];
-        Ok(match self {
-            Self::Invalid => &TAGS[0],
-            Self::EnsureSeedNodeQuorum => &TAGS[1],
-            Self::Partition { kind, .. } => match kind {
-                SafetyCheckKind::EnsurePartitionQuorum => &TAGS[2],
-                SafetyCheckKind::WaitForPrimaryPlacement => &TAGS[3],
-                SafetyCheckKind::WaitForPrimarySwap => &TAGS[4],
-                SafetyCheckKind::WaitForReconfiguration => &TAGS[5],
-                SafetyCheckKind::WaitForInBuildReplica => &TAGS[6],
-                SafetyCheckKind::EnsureAvailability => &TAGS[7],
-                _ => {
-                    return Err(mssf_transport::Error::InvalidInput(
-                        "unsupported safety-check dynamic kind",
-                    ))
-                }
-            },
-        })
-    }
-    fn deserialize_fields<'de, D: serde::Deserializer<'de>>(
-        tag: &[u8],
-        d: D,
-    ) -> std::result::Result<Self, D::Error> {
-        let raw: [u8; 4] = tag
-            .try_into()
-            .map_err(|_| serde::de::Error::custom("invalid safety-check type tag"))?;
-        let kind = i32::from_le_bytes(raw);
-        #[derive(Deserialize)]
-        struct Base {
-            kind: i64,
-        }
-        #[derive(Deserialize)]
-        struct Partition {
-            base: mssf_transport::serialization::serde::Inline<Base>,
-            partition: Derived<PartitionId>,
-        }
-        #[derive(Deserialize)]
-        struct PartitionId {
-            id: Guid,
-        }
-        let (wire_kind, value) = match kind {
-            0 | 1 => {
-                let base = Base::deserialize(d)?;
-                (
-                    base.kind,
-                    if kind == 0 {
-                        Self::Invalid
-                    } else {
-                        Self::EnsureSeedNodeQuorum
-                    },
-                )
-            }
-            2..=7 => {
-                let wire = Partition::deserialize(d)?;
-                (
-                    wire.base.0.kind,
-                    Self::Partition {
-                        kind: SafetyCheckKind::from_raw(i64::from(kind)),
-                        partition_id: uuid::Uuid::from_bytes_le(wire.partition.0.id.0),
-                    },
-                )
-            }
-            _ => {
-                return Err(serde::de::Error::custom(
-                    "unsupported safety-check dynamic kind",
-                ))
-            }
+#[derive(Deserialize)]
+enum SafetyWire {
+    #[serde(rename = "0")]
+    Invalid,
+    #[serde(rename = "1")]
+    EnsureSeedNodeQuorum,
+    #[serde(rename = "2")]
+    EnsurePartitionQuorum(PartitionWire),
+    #[serde(rename = "3")]
+    WaitForPrimaryPlacement(PartitionWire),
+    #[serde(rename = "4")]
+    WaitForPrimarySwap(PartitionWire),
+    #[serde(rename = "5")]
+    WaitForReconfiguration(PartitionWire),
+    #[serde(rename = "6")]
+    WaitForInBuildReplica(PartitionWire),
+    #[serde(rename = "7")]
+    EnsureAvailability(PartitionWire),
+}
+#[derive(Deserialize)]
+struct PartitionWire {
+    partition: Derived<PartitionId>,
+}
+#[derive(Deserialize)]
+struct PartitionId {
+    id: Guid,
+}
+impl From<SafetyWire> for SafetyCheck {
+    fn from(value: SafetyWire) -> Self {
+        let partition = |kind, wire: PartitionWire| Self::Partition {
+            kind,
+            partition_id: uuid::Uuid::from_bytes_le(wire.partition.0.id.0),
         };
-        if wire_kind != i64::from(kind) {
-            return Err(serde::de::Error::custom(
-                "safety-check tag and kind disagree",
-            ));
+        match value {
+            SafetyWire::Invalid => Self::Invalid,
+            SafetyWire::EnsureSeedNodeQuorum => Self::EnsureSeedNodeQuorum,
+            SafetyWire::EnsurePartitionQuorum(wire) => {
+                partition(SafetyCheckKind::EnsurePartitionQuorum, wire)
+            }
+            SafetyWire::WaitForPrimaryPlacement(wire) => {
+                partition(SafetyCheckKind::WaitForPrimaryPlacement, wire)
+            }
+            SafetyWire::WaitForPrimarySwap(wire) => {
+                partition(SafetyCheckKind::WaitForPrimarySwap, wire)
+            }
+            SafetyWire::WaitForReconfiguration(wire) => {
+                partition(SafetyCheckKind::WaitForReconfiguration, wire)
+            }
+            SafetyWire::WaitForInBuildReplica(wire) => {
+                partition(SafetyCheckKind::WaitForInBuildReplica, wire)
+            }
+            SafetyWire::EnsureAvailability(wire) => {
+                partition(SafetyCheckKind::EnsureAvailability, wire)
+            }
         }
-        Ok(value)
     }
 }

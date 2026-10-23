@@ -54,11 +54,108 @@ field_adapter!(
     STRINGS_ADAPTER,
     "A bounded native UInt32 count followed by strings, not an object array. Encode a Vec/slice; decode into `CountedStrings<Vec<String>>`."
 );
+field_adapter!(
+    NativeEnum,
+    ENUM_ADAPTER,
+    "A tagged native enum object. Derive Serde on the enum and rename every variant to its canonical i32 code. The adapter writes/validates the i32 type tag and matching i64 kind, then reads/writes variant fields inline."
+);
+field_adapter!(
+    NumericEnum,
+    NUMERIC_ENUM_ADAPTER,
+    "A strict native i64 scalar enum. Use unit variants renamed to canonical signed-i64 codes. Unknown codes fail; declaration ordinals are never used. For unknown-value retention, use an explicit i64 conversion instead."
+);
+
+/// A struct-shaped native object with an automatically checked i32 type tag.
+///
+/// No `NativeType` implementation is needed. The tag is not a body field.
+///
+/// ```
+/// use mssf_transport::serialization::serde::{from_slice, to_vec, FixedTag};
+/// use serde::{Deserialize, Serialize};
+/// #[derive(Debug, PartialEq, Serialize, Deserialize)]
+/// struct Fields { value: String }
+/// let value = FixedTag::<_, 16>(Fields { value: "item".into() });
+/// let bytes = to_vec(&value).unwrap();
+/// assert_eq!(from_slice::<FixedTag<Fields, 16>>(&bytes).unwrap(), value);
+/// ```
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FixedTag<T, const TAG: i32>(pub T);
+
+/// A struct-shaped native object that requires empty native type information.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Untagged<T>(pub T);
+
+fn deserialize_fixed<'de, D: ::serde::Deserializer<'de>, T: Deserialize<'de>>(
+    d: D,
+    expected: &[u8],
+) -> std::result::Result<T, D::Error> {
+    struct V<'a, T> {
+        expected: &'a [u8],
+        marker: PhantomData<T>,
+    }
+    impl<'de, T: Deserialize<'de>> Visitor<'de> for V<'_, T> {
+        type Value = T;
+        fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+            f.write_str("fixed native type information and fields")
+        }
+        fn visit_seq<A: SeqAccess<'de>>(self, mut a: A) -> std::result::Result<T, A::Error> {
+            let ByteArray(tag) = a
+                .next_element()?
+                .ok_or_else(|| ::serde::de::Error::custom("missing native tag"))?;
+            if tag != self.expected {
+                return Err(::serde::de::Error::custom(
+                    "unexpected native type information",
+                ));
+            }
+            a.next_element()?
+                .ok_or_else(|| ::serde::de::Error::custom("missing native fields"))
+        }
+    }
+    d.deserialize_newtype_struct(
+        TYPED_ADAPTER,
+        V {
+            expected,
+            marker: PhantomData,
+        },
+    )
+}
+impl<T: Serialize, const TAG: i32> Serialize for FixedTag<T, TAG> {
+    fn serialize<S: ::serde::Serializer>(&self, s: S) -> std::result::Result<S::Ok, S::Error> {
+        s.serialize_newtype_struct(
+            TYPED_ADAPTER,
+            &TypeFields {
+                type_info: &TAG.to_le_bytes(),
+                value: &self.0,
+            },
+        )
+    }
+}
+impl<'de, T: Deserialize<'de>, const TAG: i32> Deserialize<'de> for FixedTag<T, TAG> {
+    fn deserialize<D: ::serde::Deserializer<'de>>(d: D) -> std::result::Result<Self, D::Error> {
+        deserialize_fixed(d, &TAG.to_le_bytes()).map(Self)
+    }
+}
+impl<T: Serialize> Serialize for Untagged<T> {
+    fn serialize<S: ::serde::Serializer>(&self, s: S) -> std::result::Result<S::Ok, S::Error> {
+        s.serialize_newtype_struct(
+            TYPED_ADAPTER,
+            &TypeFields {
+                type_info: &[],
+                value: &self.0,
+            },
+        )
+    }
+}
+impl<'de, T: Deserialize<'de>> Deserialize<'de> for Untagged<T> {
+    fn deserialize<D: ::serde::Deserializer<'de>>(d: D) -> std::result::Result<Self, D::Error> {
+        deserialize_fixed(d, &[]).map(Self)
+    }
+}
 
 /// A nullable native object pointer. This never represents an absent field.
 ///
 /// Plain struct targets require empty type information. Use `Pointer<Typed<T>>`
-/// for explicitly dispatched/validated native tags.
+/// or the automatic `FixedTag`, `Untagged` and `NativeEnum` adapters for tags.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Pointer<T>(pub Option<T>);
 
@@ -106,6 +203,9 @@ optional_adapter!(Pointer, POINTER_ADAPTER);
 optional_adapter!(Trailing, TRAILING_ADAPTER);
 
 /// Native tagged-object dispatch, independent of Serde enum variant ordinals.
+///
+/// This is an escape hatch for exceptional layouts/raw tag policies. Prefer
+/// [`FixedTag`], [`Untagged`] or [`NativeEnum`] for automatically derived schemas.
 ///
 /// `deserialize_fields` receives the bounded raw tag before reading any fields.
 /// Select the supported schema, deserialize its fields with `D`, and enforce
@@ -162,25 +262,34 @@ pub trait NativeType: Sized {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Typed<T>(pub T);
 
-struct TypeFields<'a, T>(&'a T);
+struct TypeFields<'a, T: ?Sized> {
+    type_info: &'a [u8],
+    value: &'a T,
+}
 struct TypeBytes<'a>(&'a [u8]);
 impl Serialize for TypeBytes<'_> {
     fn serialize<S: ::serde::Serializer>(&self, s: S) -> std::result::Result<S::Ok, S::Error> {
         s.serialize_bytes(self.0)
     }
 }
-impl<T: NativeType + Serialize> Serialize for TypeFields<'_, T> {
+impl<T: Serialize + ?Sized> Serialize for TypeFields<'_, T> {
     fn serialize<S: ::serde::Serializer>(&self, s: S) -> std::result::Result<S::Ok, S::Error> {
         let mut fields = s.serialize_tuple_struct(TYPED_ADAPTER, 2)?;
-        let type_info = self.0.type_info().map_err(::serde::ser::Error::custom)?;
-        fields.serialize_field(&TypeBytes(type_info))?;
-        fields.serialize_field(self.0)?;
+        fields.serialize_field(&TypeBytes(self.type_info))?;
+        fields.serialize_field(self.value)?;
         fields.end()
     }
 }
 impl<T: NativeType + Serialize> Serialize for Typed<T> {
     fn serialize<S: ::serde::Serializer>(&self, s: S) -> std::result::Result<S::Ok, S::Error> {
-        s.serialize_newtype_struct(TYPED_ADAPTER, &TypeFields(&self.0))
+        let type_info = self.0.type_info().map_err(::serde::ser::Error::custom)?;
+        s.serialize_newtype_struct(
+            TYPED_ADAPTER,
+            &TypeFields {
+                type_info,
+                value: &self.0,
+            },
+        )
     }
 }
 

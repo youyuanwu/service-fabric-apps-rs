@@ -592,7 +592,11 @@ assert_eq!(from_slice::<ListenWire>(&bytes).unwrap(), value);
 | `ObjectArray<T>` | Native object-array metadata even when empty; encode a Vec/slice of struct-shaped elements, decode `ObjectArray<Vec<Row>>`. |
 | `CountedStrings<T>` | Native UInt32 count followed by inline strings, including an explicit zero count. Encode Vec/slice strings; decode `CountedStrings<Vec<String>>`. Not string-array or object-array metadata. |
 | `Pointer<T>` | Explicit nullable native object pointer. `None` writes the empty-pointer marker; a plain struct target requires empty type information. |
-| `Typed<T>` / `NativeType` | Native tagged object; dispatch receives bounded raw type information before reading the ordered fields. Supports roots, nested objects, object-array elements and `Pointer<Typed<T>>`. |
+| `FixedTag<T, TAG>` | Automatically validate a fixed i32 type tag, then derive-deserialize the struct fields. The tag is not an extra body field. |
+| `Untagged<T>` | Automatically require empty type information for a struct-shaped object. |
+| `NativeEnum<T>` | Derived polymorphic enum: explicit i32 variant codes select the object tag, the matching i64 body kind and inline variant fields. |
+| `NumericEnum<T>` | Strict derived unit enum encoded as a single signed i64 code, without object framing. |
+| `Typed<T>` / `NativeType` | Escape hatch for exceptional raw-tag policies, not required for fixed schemas or derived polymorphic enums. Supports roots, nested objects, object-array elements and pointer targets. |
 | `Inline<T>` | Struct fields in the current object scope without a nested object. |
 | `Derived<T>` | Advance to the next native scope, then read/write the struct's fields inline. |
 | `Trailing<T>` | A positional suffix: `None` is genuine absence at the current scope end, not a null pointer. Present malformed data remains an error. |
@@ -631,23 +635,56 @@ including numeric `HealthStateFilter` inside the EventsFilter JSON string.
 
 Generic Vec/array/tuple/map, Option, enums, unit, floats, chars and other integer
 widths are unsupported unless used through an explicit native adapter.
-Ordinary enum indices are not native signed-64-bit codes: wire DTOs use i64
-with operation-specific conversion. Empty container kind is never inferred
-from the sequence length or first element.
+Ordinary enum indices and Rust discriminants are not native codes. Explicit enum
+adapters use canonical signed decimal variant renames, never declaration order.
+Empty container kind is never inferred from the sequence length or first element.
 
 Native structure is explicit in the wire DTO rather than inferred from ordinary
 Option/Vec/enum types. For example, a native object array of evaluation wrappers
 uses `ObjectArray<Vec<Slot>>` with a named `struct Slot { value:
-Pointer<Typed<Evaluation>> }`; a transparent one-field tuple struct would omit
+Pointer<NativeEnum<Evaluation>> }`; a transparent one-field tuple struct would omit
 the required outer object.
 
-Implement `NativeType::deserialize_fields` to select the supported schema from
-its tag, deserialize the ordered fields using the supplied Serde deserializer,
-and validate tag/kind agreement. `type_info` supplies the raw encoding tag or
-returns an error for unsupported values. Unknown structural tags are not
-silently mapped to a default enum variant. The same machinery handles node
-safety checks and health evaluations; ordinary numeric enums remain i64 fields
-with explicit conversion policies.
+For fixed schemas, use `FixedTag<Fields, 16>` or `Untagged<Fields>` with ordinary
+Serde struct derives. No `deserialize_fields` callback is needed. For polymorphic
+objects, derive an enum with explicit native codes:
+
+```rust
+#[derive(serde::Serialize, serde::Deserialize)]
+enum EvaluationWire {
+    #[serde(rename = "1")]
+    Event { description: String },
+    #[serde(rename = "0")]
+    Invalid,
+}
+```
+
+Wrap it in `NativeEnum<EvaluationWire>`. The backend implements Serde
+`EnumAccess`/`VariantAccess`: it reads the raw four-byte i32 tag, verifies the
+matching i64 body kind, selects the derived variant and deserializes its fields
+inline. Unit, struct and tuple variants are supported; a newtype variant must
+contain a struct-shaped field schema. Do not repeat the kind in the payload
+DTO. A partition safety-check payload uses a `Derived<PartitionFields>` field
+to enter its derived scope. Encoding uses the same mapping in reverse.
+
+`NumericEnum<T>` instead maps derived unit variants to signed i64 scalar codes.
+It is used for strict application/service status, definition, health and service
+kind wire enums. Unknown codes are errors. Node scalar enums (`NodeStatus`,
+`HealthState`, deactivation/task enums and `SafetyCheckKind`) implement Serde
+through the shared numeric-enum macro: both native and JSON formats use their
+signed i64 codes, including `Unrecognized(i64)`. This preserves the deliberate
+strict-list versus unknown-retaining-node distinction.
+
+Both adapters require explicit canonical numeric variant names. Unknown codes
+are rejected even if an enum declares `#[serde(other)]`; fallback variants cannot
+silently accept unknown structural kinds. Use one unique canonical code per
+variant; Serde aliases are outside the native schema contract. Nonnumeric names
+are rejected.
+
+Only exceptional raw tag policies need `NativeType::deserialize_fields`.
+The client retains it for paging status, where existing node-query policy
+accepts arbitrary type information but application/service queries require an
+empty tag. The supplied deserializer still handles the ordinary struct fields.
 
 `Inline` and `Derived` require an open object. `Trailing` is only for positional
 suffixes: once one suffix is omitted, all following fields in that scope must
@@ -662,7 +699,9 @@ not finish the enclosing object. Encoder errors roll back the failed bridge's
 bytes; decoder errors do not rewind input.
 
 Only fixed positional schemas are wire-preserving. Do not apply flatten,
-skip/skip_serializing_if, default or enum-tagging attributes to native DTOs.
+skip/skip_serializing_if, default or Serde enum-representation attributes
+(`tag`, `content`, `untagged`) to native DTOs. Explicit numeric variant renames
+are the supported mapping for the two enum adapters.
 The backend rejects observable unsupported calls, but cannot detect every
 attribute or custom serializer that hides a positional shape change.
 Serialization custom errors are bounded static `InvalidInput` diagnostics;
@@ -674,8 +713,9 @@ lossless re-emission.
 Production adoption includes listen-instance controls/common header writers,
 query requests/results, ping/NameExists replies, complete node/deactivation/task
 and node-health records, application/service records, naming URI bodies and
-complete optional fault details. Safety checks and health evaluations share
-tagged dispatch. Naming URI encode/decode share one schema using CountedStrings.
+complete optional fault details. Safety checks and health evaluations use
+derived enums through shared native dispatch. Query wrappers use FixedTag;
+naming URI encode/decode share an Untagged schema using CountedStrings.
 Header record framing/duplicate rules and query argument order are unchanged;
 QueryAddress is not added to the body.
 

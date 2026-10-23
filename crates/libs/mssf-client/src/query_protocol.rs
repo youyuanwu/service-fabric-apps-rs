@@ -3,7 +3,7 @@
 use mssf_transport::{
     message::{Message, ACTION, ACTOR},
     serialization::{
-        serde::{from_slice, to_vec, NativeType, ObjectArray, Pointer, Typed},
+        serde::{from_slice, to_vec, FixedTag, NativeType, ObjectArray, Pointer, Typed},
         MAX_COLLECTION_COUNT,
     },
 };
@@ -111,10 +111,8 @@ pub(crate) fn decode_list<W: DeserializeOwned, T, const TAG: i32>(
         items: ObjectArray<Vec<W>>,
         item: Pointer<Empty>,
     }
-    let result = decode::<TaggedPayload<ListWire<W>, TAG>, _>(
-        &message.body,
-        strict_paging,
-        |TaggedPayload(wire)| {
+    let result =
+        decode::<FixedTag<ListWire<W>, TAG>, _>(&message.body, strict_paging, |FixedTag(wire)| {
             if wire.item.0.is_some() {
                 return Err(Error::Protocol("list has a single-item payload"));
             }
@@ -123,8 +121,7 @@ pub(crate) fn decode_list<W: DeserializeOwned, T, const TAG: i32>(
                 .into_iter()
                 .map(record)
                 .collect::<Result<Vec<_>>>()
-        },
-    )?;
+        })?;
     if result.kind != 2 {
         return Err(Error::Protocol("query result is not a List"));
     }
@@ -142,27 +139,6 @@ pub(crate) struct QueryResult<T> {
     pub paging: Option<String>,
 }
 
-/// Fixed native result-wrapper tag; dispatch checks it before reading the body.
-pub(crate) struct TaggedPayload<T, const TAG: i32>(pub T);
-impl<T, const TAG: i32> TaggedPayload<T, TAG> {
-    const TYPE_INFO: [u8; 4] = TAG.to_le_bytes();
-}
-impl<T: DeserializeOwned, const TAG: i32> NativeType for TaggedPayload<T, TAG> {
-    fn type_info(&self) -> mssf_transport::Result<&[u8]> {
-        Ok(&Self::TYPE_INFO)
-    }
-    fn deserialize_fields<'de, D: serde::Deserializer<'de>>(
-        tag: &[u8],
-        d: D,
-    ) -> std::result::Result<Self, D::Error> {
-        if tag != Self::TYPE_INFO {
-            return Err(serde::de::Error::custom(
-                "unexpected native query wrapper type",
-            ));
-        }
-        T::deserialize(d).map(Self)
-    }
-}
 struct PagingStatus {
     type_info: Vec<u8>,
     token: String,
@@ -186,27 +162,22 @@ impl NativeType for PagingStatus {
         })
     }
 }
-pub(crate) fn decode<T: NativeType, U>(
+pub(crate) fn decode<T: DeserializeOwned, U>(
     body: &[u8],
     strict_paging: bool,
     validate: impl FnOnce(T) -> Result<U>,
 ) -> Result<QueryResult<U>> {
     #[derive(Deserialize)]
-    #[serde(bound(deserialize = "T: NativeType"))]
     struct Wire<T> {
         kind: i64,
-        payload: Pointer<Typed<T>>,
+        payload: Pointer<T>,
         error: i64,
         paging: Pointer<Typed<PagingStatus>>,
     }
     let wire: Wire<T> = from_slice(body)?;
     // A native query error must not hide a malformed payload and allow reuse
     // of a connection that previously failed protocol validation.
-    let payload = wire
-        .payload
-        .0
-        .map(|Typed(value)| validate(value))
-        .transpose()?;
+    let payload = wire.payload.0.map(validate).transpose()?;
     let paging = wire
         .paging
         .0

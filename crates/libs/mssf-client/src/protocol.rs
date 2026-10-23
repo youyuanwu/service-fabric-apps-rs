@@ -1,5 +1,5 @@
 use mssf_transport::serialization::serde::{
-    from_fields, from_slice, to_vec, ByteArray, CountedStrings, NativeType, Typed,
+    from_fields, from_slice, to_vec, ByteArray, CountedStrings, Untagged,
 };
 use mssf_transport::{message::Message, serialization::Decoder};
 use serde::{Deserialize, Serialize};
@@ -11,7 +11,7 @@ pub(crate) const DELETE_NAME_HEADER: u16 = 0x8033;
 
 pub(crate) fn encode_name(name: &str) -> Result<Vec<u8>> {
     validate_name(name)?;
-    to_vec(&Typed(NamingUriWire {
+    to_vec(&Untagged(NamingUriWire {
         uri_type: 1,
         scheme: "fabric".into(),
         authority: String::new(),
@@ -42,22 +42,6 @@ pub(crate) struct NamingUriWire {
     query: String,
     fragment: String,
     segments: CountedStrings<Vec<String>>,
-}
-impl NativeType for NamingUriWire {
-    fn type_info(&self) -> mssf_transport::Result<&[u8]> {
-        Ok(&[])
-    }
-    fn deserialize_fields<'de, D: serde::Deserializer<'de>>(
-        tag: &[u8],
-        d: D,
-    ) -> std::result::Result<Self, D::Error> {
-        if !tag.is_empty() {
-            return Err(serde::de::Error::custom(
-                "unsupported native naming URI type",
-            ));
-        }
-        Self::deserialize(d)
-    }
 }
 impl NamingUriWire {
     pub(crate) fn into_name(self) -> Result<String> {
@@ -277,7 +261,7 @@ mod tests {
             let bytes = encode_name(name).unwrap();
             assert_eq!(bytes, encoder.finish());
             assert_eq!(
-                from_slice::<Typed<NamingUriWire>>(&bytes)
+                from_slice::<Untagged<NamingUriWire>>(&bytes)
                     .unwrap()
                     .0
                     .into_name()

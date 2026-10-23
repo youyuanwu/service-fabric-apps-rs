@@ -289,7 +289,11 @@ remove native distinctions absent from a generic Rust model:
   inline strings, including its zero-count form.
 - **Native value types:** GUID layout, TimeSpan ticks, and explicit signed
   64-bit enum codes need wire-specific conversions. Ordinary derived enum
-  variant indices are not native numeric codes.
+  variant indices are not native numeric codes. `NativeEnum` selects a native
+  i32 type tag and matching i64 kind from explicit variant renames, then uses
+  Serde EnumAccess/VariantAccess for the derived payload. `NumericEnum` separately
+  handles strict i64 scalar unit enums; unknown-retaining node enums share
+  signed numeric Serialize/Deserialize implementations.
 - **Scope and nesting:** inline MessageId fields differ from a nested ActivityId
   object. Native base/derived scopes are not automatically equivalent to
   Serde struct nesting or `flatten`. `Inline` and `Derived` represent these
@@ -298,8 +302,9 @@ remove native distinctions absent from a generic Rust model:
   and polymorphic type information need explicit decoder/storage behavior.
   Ordinary derives do not automatically preserve that native information.
   `Trailing` distinguishes true scope-end absence from malformed present data;
-  `Pointer` distinguishes null metadata from absence. `Typed`/`NativeType`
-  dispatch supported object schemas from bounded raw type information.
+  `Pointer` distinguishes null metadata from absence. `FixedTag`/`Untagged`
+  automatically validate fixed object tags before deriving the fields;
+  `Typed`/`NativeType` remain an escape hatch for exceptional raw tag policies.
 
 `to_vec`/`from_slice` encode/decode native values; struct roots include an object,
 scalar roots do not, and complete root consumption is checked.
@@ -318,7 +323,9 @@ the same codec through explicit adapters, not generic Option/enum inference.
 Domain defaults and validation belong in conversion code.
 
 Fixed-order wire DTOs must not use positional omission, flattening, defaults or
-enum tagging. Unsupported backend calls fail, but attributes/custom serializers
+Serde enum-representation attributes. Canonical numeric variant renames select
+codes explicitly for the native enum adapters, never via ordinal/discriminant
+inference. Unsupported backend calls fail, but attributes/custom serializers
 hidden from the backend cannot universally be detected; wire stability depends
 on the documented schema contract and independent byte/native tests. Static
 Serde custom errors preserve InvalidInput for encode and Protocol for decode.
@@ -333,8 +340,10 @@ writers, query requests/results, ping/NameExists replies, complete node and
 health wire bodies, naming URIs, application/service records and optional
 fault details. MessageId remains
 inline and Activity nested; query argument order is preserved and QueryAddress
-is not added as a body field. Safety checks and health evaluations share
-tagged-object dispatch. Application/service suffixes use explicit Trailing
+is not added as a body field. Safety checks and health evaluations share derived
+enum dispatch, including tag/kind agreement checks. Fixed query-wrapper and
+empty naming URI tags no longer need custom deserialization callbacks.
+Application/service suffixes use explicit Trailing
 fields. URI redundancy, node-ID agreement, duplicate parameters, enum and
 cross-field checks remain validated wire-to-model conversions. Query payload
 validation still precedes embedded remote errors. Paging tag strictness remains

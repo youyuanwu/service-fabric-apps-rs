@@ -4,7 +4,7 @@ use std::collections::BTreeMap;
 
 use mssf_transport::{
     message::Message,
-    serialization::serde::{ObjectArray, Trailing, Typed},
+    serialization::serde::{NumericEnum, ObjectArray, Trailing, Untagged},
 };
 use serde::{Deserialize, Serialize};
 
@@ -128,11 +128,37 @@ pub(crate) fn decode_services(message: &Message) -> Result<ServiceListPage> {
     )
 }
 
-fn health(raw: i64) -> Result<HealthState> {
-    match HealthState::from_raw(raw) {
-        HealthState::Unrecognized(_) => Err(Error::Protocol("unsupported list health state")),
-        state => Ok(state),
-    }
+macro_rules! strict_wire_enum {
+    ($wire:ident => $model:ident { $($variant:ident = $code:literal),* $(,)? }) => {
+        #[derive(Deserialize)]
+        enum $wire {
+            $(#[serde(rename = $code)] $variant,)*
+        }
+        impl From<$wire> for $model {
+            fn from(value: $wire) -> Self {
+                match value { $($wire::$variant => Self::$variant,)* }
+            }
+        }
+    };
+}
+strict_wire_enum!(ApplicationStatusWire => ApplicationStatus {
+    Invalid = "0", Ready = "1", Upgrading = "2", Creating = "3", Deleting = "4", Failed = "5",
+});
+strict_wire_enum!(DefinitionWire => ApplicationDefinitionKind {
+    ServiceFabricApplicationDescription = "0", Compose = "1", MeshApplicationDescription = "2", Invalid = "65535",
+});
+strict_wire_enum!(ServiceStatusWire => ServiceStatus {
+    Unknown = "0", Active = "1", Upgrading = "2", Deleting = "3", Creating = "4", Failed = "5",
+});
+strict_wire_enum!(ListHealthWire => HealthState {
+    Invalid = "0", Ok = "1", Warning = "2", Error = "3", Unknown = "65535",
+});
+#[derive(Deserialize)]
+enum ServiceKindWire {
+    #[serde(rename = "1")]
+    Stateless,
+    #[serde(rename = "2")]
+    Stateful,
 }
 
 #[derive(Deserialize)]
@@ -149,29 +175,21 @@ fn parameters(pairs: ObjectArray<Vec<ParameterPair>>) -> Result<BTreeMap<String,
 
 #[derive(Deserialize)]
 struct ApplicationWire {
-    name: Typed<NamingUriWire>,
+    name: Untagged<NamingUriWire>,
     type_name: String,
     type_version: String,
-    status: i64,
-    health: i64,
+    status: NumericEnum<ApplicationStatusWire>,
+    health: NumericEnum<ListHealthWire>,
     parameters: ObjectArray<Vec<ParameterPair>>,
     deprecated_version: Trailing<String>,
     deprecated_parameters: Trailing<ObjectArray<Vec<ParameterPair>>>,
-    definition_kind: Trailing<i64>,
+    definition_kind: Trailing<NumericEnum<DefinitionWire>>,
 }
 impl ApplicationWire {
     fn into_application(self) -> Result<Application> {
         let name = self.name.0.into_name()?;
-        let status = match self.status {
-            0 => ApplicationStatus::Invalid,
-            1 => ApplicationStatus::Ready,
-            2 => ApplicationStatus::Upgrading,
-            3 => ApplicationStatus::Creating,
-            4 => ApplicationStatus::Deleting,
-            5 => ApplicationStatus::Failed,
-            _ => return Err(Error::Protocol("unsupported application status")),
-        };
-        let health_state = health(self.health)?;
+        let status = self.status.0.into();
+        let health_state = self.health.0.into();
         let parameters = parameters(self.parameters)?;
         if self
             .deprecated_version
@@ -191,13 +209,11 @@ impl ApplicationWire {
                 "nonempty deprecated application upgrade parameters",
             ));
         }
-        let definition_kind = match self.definition_kind.0 {
-            Some(0) => ApplicationDefinitionKind::ServiceFabricApplicationDescription,
-            Some(1) => ApplicationDefinitionKind::Compose,
-            Some(2) => ApplicationDefinitionKind::MeshApplicationDescription,
-            None | Some(65535) => ApplicationDefinitionKind::Invalid,
-            _ => return Err(Error::Protocol("unsupported application definition kind")),
-        };
+        let definition_kind = self
+            .definition_kind
+            .0
+            .map(|NumericEnum(value)| value.into())
+            .unwrap_or(ApplicationDefinitionKind::Invalid);
         Ok(Application {
             name,
             type_name: self.type_name,
@@ -212,35 +228,31 @@ impl ApplicationWire {
 
 #[derive(Deserialize)]
 struct ServiceWire {
-    kind: i64,
-    name: Typed<NamingUriWire>,
+    kind: NumericEnum<ServiceKindWire>,
+    name: Untagged<NamingUriWire>,
     type_name: String,
     manifest_version: String,
     persisted: bool,
-    health: i64,
-    status: Trailing<i64>,
+    health: NumericEnum<ListHealthWire>,
+    status: Trailing<NumericEnum<ServiceStatusWire>>,
     is_service_group: Trailing<bool>,
 }
 impl ServiceWire {
     fn into_service(self) -> Result<Service> {
         let name = self.name.0.into_name()?;
-        let kind = match (self.kind, self.persisted) {
-            (1, false) => ServiceKind::Stateless,
-            (2, has_persisted_state) => ServiceKind::Stateful {
+        let kind = match (self.kind.0, self.persisted) {
+            (ServiceKindWire::Stateless, false) => ServiceKind::Stateless,
+            (ServiceKindWire::Stateful, has_persisted_state) => ServiceKind::Stateful {
                 has_persisted_state,
             },
             _ => return Err(Error::Protocol("unsupported service kind/persistence")),
         };
-        let health_state = health(self.health)?;
-        let status = match self.status.0 {
-            None | Some(0) => ServiceStatus::Unknown,
-            Some(1) => ServiceStatus::Active,
-            Some(2) => ServiceStatus::Upgrading,
-            Some(3) => ServiceStatus::Deleting,
-            Some(4) => ServiceStatus::Creating,
-            Some(5) => ServiceStatus::Failed,
-            _ => return Err(Error::Protocol("unsupported service status")),
-        };
+        let health_state = self.health.0.into();
+        let status = self
+            .status
+            .0
+            .map(|NumericEnum(value)| value.into())
+            .unwrap_or(ServiceStatus::Unknown);
         Ok(Service {
             name,
             type_name: self.type_name,

@@ -6,15 +6,20 @@
 //! `bitflags` types with Serde enabled use their underlying integer directly
 //! when its width is supported. Unknown bits are retained; validate domain rules
 //! separately. Both encoding and decoding are non-human-readable.
-//! Generic sequences, tuples, maps, Option, enums, unit, floats, chars and other
+//! Bare sequences, tuples, maps, Option, enums, unit, floats, chars and other
 //! integer widths are unsupported. Owned decoding is supported; strings/bytes
 //! are not borrowed from the UTF-16/native input.
 //!
 //! Native pointers, tags, scopes and versioned suffixes use explicit adapters:
 //! [`Pointer`], [`Typed`]/[`NativeType`], [`Inline`], [`Derived`] and [`Trailing`].
 //! [`CountedStrings`] handles UInt32-counted string sequences.
+//! [`FixedTag`] and [`Untagged`] automatically validate struct tags.
+//! [`NativeEnum`] uses explicitly renamed i32 variant codes for polymorphic
+//! objects and checks their matching i64 body kinds. [`NumericEnum`] is separate:
+//! a strict i64 scalar mapping for derived unit enums. Variant ordinals and Rust
+//! discriminants are never inferred as native codes.
 //! An ordinary Option is **not** a pointer or
-//! an absent suffix. Default/skip/flatten/tagging attributes and shape-changing
+//! an absent suffix. Default/skip/flatten/enum-representation attributes and shape-changing
 //! custom serializers are outside the positional wire-preserving contract;
 //! attributes invisible to a format backend cannot universally be detected.
 //! Renames do not affect bytes. Supported unknown tails are skipped, not retained.
@@ -27,18 +32,42 @@
 //! let value = Payload { address: "node".into(), instance: 7, nonce: Guid([0; 16]) };
 //! assert_eq!(from_slice::<Payload>(&to_vec(&value).unwrap()).unwrap(), value);
 //! ```
+//!
+//! Derived polymorphism requires no `NativeType` implementation or body-kind field:
+//!
+//! ```
+//! use mssf_transport::serialization::serde::{from_slice, to_vec, NativeEnum, Pointer};
+//! use serde::{Deserialize, Serialize};
+//!
+//! #[derive(Debug, PartialEq, Serialize, Deserialize)]
+//! enum Evaluation {
+//!     #[serde(rename = "1")]
+//!     Event { description: String },
+//!     #[serde(rename = "0")]
+//!     Invalid,
+//! }
+//! let value = Pointer(Some(NativeEnum(Evaluation::Event { description: "event".into() })));
+//! let bytes = to_vec(&value).unwrap();
+//! assert_eq!(from_slice::<Pointer<NativeEnum<Evaluation>>>(&bytes).unwrap(), value);
+//! ```
 
 use super::{Decoder, Encoder, MAX_COLLECTION_COUNT, MAX_OBJECT_SIZE, MAX_STRING_UNITS};
 use crate::{Error, Result};
 use ::serde::{
-    de::{DeserializeSeed, SeqAccess, Visitor},
-    ser::{Impossible, SerializeSeq, SerializeStruct, SerializeTupleStruct},
+    de::{DeserializeSeed, EnumAccess, SeqAccess, VariantAccess, Visitor},
+    ser::{
+        Impossible, SerializeSeq, SerializeStruct, SerializeStructVariant, SerializeTupleStruct,
+        SerializeTupleVariant,
+    },
     Deserialize, Serialize,
 };
 use std::fmt;
 
 mod adapters;
-pub use adapters::{CountedStrings, Derived, Inline, NativeType, Pointer, Trailing, Typed};
+pub use adapters::{
+    CountedStrings, Derived, FixedTag, Inline, NativeEnum, NativeType, NumericEnum, Pointer,
+    Trailing, Typed, Untagged,
+};
 
 const GUID_ADAPTER: &str = "$fabric::Guid";
 const ARRAY_ADAPTER: &str = "$fabric::ObjectArray";
@@ -48,6 +77,8 @@ const INLINE_ADAPTER: &str = "$fabric::Inline";
 const DERIVED_ADAPTER: &str = "$fabric::Derived";
 const TRAILING_ADAPTER: &str = "$fabric::Trailing";
 const STRINGS_ADAPTER: &str = "$fabric::CountedStrings";
+const ENUM_ADAPTER: &str = "$fabric::NativeEnum";
+const NUMERIC_ENUM_ADAPTER: &str = "$fabric::NumericEnum";
 
 /// GUID bytes in native Windows field order (e.g. `Uuid::to_bytes_le()`).
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -241,6 +272,39 @@ enum Mode {
     Trailing,
     Strings,
     StringElement,
+    Enum,
+    EnumPointer,
+    EnumContents,
+    NumericEnum,
+}
+
+fn variant_code(name: &str) -> Option<i64> {
+    if name.len() > 20 {
+        return None;
+    }
+    let code = name.parse::<i64>().ok()?;
+    (code.to_string() == name).then_some(code)
+}
+
+fn variant_name(
+    code: i64,
+    variants: &'static [&'static str],
+    numeric: bool,
+) -> Result<&'static str> {
+    let mut selected = None;
+    for &name in variants {
+        let value = variant_code(name).ok_or_else(decode_error)?;
+        if !numeric && i32::try_from(value).is_err() {
+            return Err(decode_error());
+        }
+        if value == code {
+            if selected.is_some() {
+                return Err(Error::Protocol("duplicate native enum code"));
+            }
+            selected = Some(name);
+        }
+    }
+    selected.ok_or(Error::Protocol("unsupported native enum code"))
 }
 
 struct Serializer<'a> {
@@ -294,10 +358,10 @@ impl<'a> ::serde::Serializer for Serializer<'a> {
     type SerializeSeq = Compound<'a>;
     type SerializeTuple = Impossible<(), Error>;
     type SerializeTupleStruct = Compound<'a>;
-    type SerializeTupleVariant = Impossible<(), Error>;
+    type SerializeTupleVariant = Compound<'a>;
     type SerializeMap = Impossible<(), Error>;
     type SerializeStruct = Compound<'a>;
-    type SerializeStructVariant = Impossible<(), Error>;
+    type SerializeStructVariant = Compound<'a>;
 
     serialize_scalar!(serialize_bool, bool, boolean);
     serialize_scalar!(serialize_u16, u16, u16);
@@ -310,7 +374,14 @@ impl<'a> ::serde::Serializer for Serializer<'a> {
         serialize_i128(v: i128); serialize_u128(v: u128);
         serialize_f32(v: f32); serialize_f64(v: f64); serialize_char(v: char);
         serialize_unit(); serialize_unit_struct(n: &'static str);
-        serialize_unit_variant(n: &'static str, i: u32, v: &'static str);
+    }
+    fn serialize_unit_variant(self, _: &'static str, _: u32, variant: &'static str) -> Result<()> {
+        if self.mode == Mode::NumericEnum {
+            self.encoder
+                .i64(variant_code(variant).ok_or_else(encode_error)?);
+            return Ok(());
+        }
+        self.enum_compound(variant, 0)?.finish()
     }
     fn serialize_str(self, value: &str) -> Result<()> {
         if !matches!(self.mode, Mode::Value | Mode::StringElement) {
@@ -371,6 +442,9 @@ impl<'a> ::serde::Serializer for Serializer<'a> {
             (Mode::Value, POINTER_ADAPTER) => Mode::Pointer,
             (Mode::Value | Mode::Object, TYPED_ADAPTER) => Mode::Typed,
             (Mode::Pointer, TYPED_ADAPTER) => Mode::TypedPointer,
+            (Mode::Value | Mode::Object, ENUM_ADAPTER) => Mode::Enum,
+            (Mode::Pointer, ENUM_ADAPTER) => Mode::EnumPointer,
+            (Mode::Value, NUMERIC_ENUM_ADAPTER) => Mode::NumericEnum,
             (Mode::Value, TRAILING_ADAPTER) if self.encoder.depth > 0 => Mode::Trailing,
             (Mode::Value, INLINE_ADAPTER | DERIVED_ADAPTER) if self.encoder.depth > 0 => {
                 if name == DERIVED_ADAPTER {
@@ -382,7 +456,8 @@ impl<'a> ::serde::Serializer for Serializer<'a> {
             (
                 _,
                 GUID_ADAPTER | ARRAY_ADAPTER | POINTER_ADAPTER | TYPED_ADAPTER | TRAILING_ADAPTER
-                | INLINE_ADAPTER | DERIVED_ADAPTER | STRINGS_ADAPTER,
+                | INLINE_ADAPTER | DERIVED_ADAPTER | STRINGS_ADAPTER | ENUM_ADAPTER
+                | NUMERIC_ENUM_ADAPTER,
             ) => return Err(encode_error()),
             _ => self.mode,
         };
@@ -395,10 +470,15 @@ impl<'a> ::serde::Serializer for Serializer<'a> {
         self,
         _: &'static str,
         _: u32,
-        _: &'static str,
-        _: &T,
+        variant: &'static str,
+        value: &T,
     ) -> Result<()> {
-        Err(encode_error())
+        let compound = self.enum_compound(variant, 0)?;
+        value.serialize(Serializer {
+            encoder: compound.encoder,
+            mode: Mode::Fields,
+        })?;
+        compound.finish()
     }
     fn serialize_seq(self, len: Option<usize>) -> Result<Self::SerializeSeq> {
         if !matches!(self.mode, Mode::Array | Mode::Strings) {
@@ -440,10 +520,10 @@ impl<'a> ::serde::Serializer for Serializer<'a> {
         self,
         _: &'static str,
         _: u32,
-        _: &'static str,
-        _: usize,
+        variant: &'static str,
+        len: usize,
     ) -> Result<Self::SerializeTupleVariant> {
-        Err(encode_error())
+        self.enum_compound(variant, len)
     }
     fn serialize_map(self, _: Option<usize>) -> Result<Self::SerializeMap> {
         Err(encode_error())
@@ -455,16 +535,45 @@ impl<'a> ::serde::Serializer for Serializer<'a> {
         self,
         _: &'static str,
         _: u32,
-        _: &'static str,
-        _: usize,
+        variant: &'static str,
+        len: usize,
     ) -> Result<Self::SerializeStructVariant> {
-        Err(encode_error())
+        self.enum_compound(variant, len)
     }
     fn is_human_readable(&self) -> bool {
         false
     }
 }
 impl<'a> Serializer<'a> {
+    fn enum_compound(self, variant: &'static str, len: usize) -> Result<Compound<'a>> {
+        if !matches!(self.mode, Mode::Enum | Mode::EnumPointer) {
+            return Err(encode_error());
+        }
+        let code: i32 = variant_code(variant)
+            .ok_or_else(encode_error)?
+            .try_into()
+            .map_err(|_| encode_error())?;
+        let pointer = self.mode == Mode::EnumPointer;
+        let start = self.encoder.bytes.len();
+        let depth = self.encoder.depth;
+        if pointer {
+            self.encoder.bytes.push(super::POINTER);
+        }
+        if let Err(error) = self.encoder.begin_object(&code.to_le_bytes()) {
+            self.encoder.bytes.truncate(start);
+            return Err(error);
+        }
+        self.encoder.i64(i64::from(code));
+        Ok(Compound {
+            encoder: self.encoder,
+            start,
+            depth,
+            framing: Framing::Object { pointer },
+            remaining: len,
+            complete: false,
+        })
+    }
+
     fn compound(self, len: usize) -> Result<Compound<'a>> {
         if !matches!(
             self.mode,
@@ -603,6 +712,26 @@ impl SerializeSeq for Compound<'_> {
         self.finish()
     }
 }
+impl SerializeTupleVariant for Compound<'_> {
+    type Ok = ();
+    type Error = Error;
+    fn serialize_field<T: Serialize + ?Sized>(&mut self, value: &T) -> Result<()> {
+        self.field(value)
+    }
+    fn end(self) -> Result<()> {
+        self.finish()
+    }
+}
+impl SerializeStructVariant for Compound<'_> {
+    type Ok = ();
+    type Error = Error;
+    fn serialize_field<T: Serialize + ?Sized>(&mut self, _: &'static str, value: &T) -> Result<()> {
+        self.field(value)
+    }
+    fn end(self) -> Result<()> {
+        self.finish()
+    }
+}
 
 struct Deserializer<'a, 'de> {
     decoder: &'a mut Decoder<'de>,
@@ -704,6 +833,23 @@ impl<'de> ::serde::Deserializer<'de> for Deserializer<'_, 'de> {
         name: &'static str,
         visitor: V,
     ) -> Result<V::Value> {
+        if name == ENUM_ADAPTER {
+            return match self.mode {
+                Mode::Value | Mode::Object => self.decoder.typed_object(|decoder, type_info| {
+                    visitor.visit_newtype_struct(Deserializer {
+                        decoder,
+                        mode: Mode::EnumContents,
+                        type_info: Some(type_info),
+                    })
+                }),
+                Mode::Contents => visitor.visit_newtype_struct(Self {
+                    decoder: self.decoder,
+                    mode: Mode::EnumContents,
+                    type_info: self.type_info,
+                }),
+                _ => Err(decode_error()),
+            };
+        }
         if name == TYPED_ADAPTER {
             return match self.mode {
                 Mode::Value | Mode::Object => self.decoder.typed_object(|decoder, type_info| {
@@ -725,6 +871,7 @@ impl<'de> ::serde::Deserializer<'de> for Deserializer<'_, 'de> {
             (Mode::Value, GUID_ADAPTER) => Mode::Guid,
             (Mode::Value, ARRAY_ADAPTER) => Mode::Array,
             (Mode::Value, POINTER_ADAPTER) => Mode::Pointer,
+            (Mode::Value, NUMERIC_ENUM_ADAPTER) => Mode::NumericEnum,
             (Mode::Value, TRAILING_ADAPTER) if self.decoder.depth > 0 => Mode::Trailing,
             (Mode::Value, INLINE_ADAPTER | DERIVED_ADAPTER) if self.decoder.depth > 0 => {
                 if name == DERIVED_ADAPTER {
@@ -736,7 +883,7 @@ impl<'de> ::serde::Deserializer<'de> for Deserializer<'_, 'de> {
             (
                 _,
                 GUID_ADAPTER | ARRAY_ADAPTER | POINTER_ADAPTER | TRAILING_ADAPTER | INLINE_ADAPTER
-                | DERIVED_ADAPTER | STRINGS_ADAPTER,
+                | DERIVED_ADAPTER | STRINGS_ADAPTER | NUMERIC_ENUM_ADAPTER,
             ) => return Err(decode_error()),
             _ => self.mode,
         };
@@ -796,10 +943,33 @@ impl<'de> ::serde::Deserializer<'de> for Deserializer<'_, 'de> {
     fn deserialize_enum<V: Visitor<'de>>(
         self,
         _: &'static str,
-        _: &'static [&'static str],
-        _: V,
+        variants: &'static [&'static str],
+        visitor: V,
     ) -> Result<V::Value> {
-        Err(decode_error())
+        let numeric = self.mode == Mode::NumericEnum;
+        let code = match self.mode {
+            Mode::EnumContents => {
+                let tag: [u8; 4] = self
+                    .type_info
+                    .ok_or_else(decode_error)?
+                    .try_into()
+                    .map_err(|_| Error::Protocol("native enum requires an i32 type tag"))?;
+                let expected = i64::from(i32::from_le_bytes(tag));
+                let kind = self.decoder.i64()?;
+                if kind != expected {
+                    return Err(Error::Protocol("native enum tag and kind disagree"));
+                }
+                kind
+            }
+            Mode::NumericEnum => self.decoder.i64()?,
+            _ => return Err(decode_error()),
+        };
+        let variant = variant_name(code, variants, numeric)?;
+        visitor.visit_enum(NativeEnumAccess {
+            decoder: self.decoder,
+            variant,
+            numeric,
+        })
     }
     fn is_human_readable(&self) -> bool {
         false
@@ -854,6 +1024,56 @@ impl<'de> SeqAccess<'de> for Access<'_, 'de> {
     fn size_hint(&self) -> Option<usize> {
         // Do not turn an advertised count or schema field count into a reservation.
         None
+    }
+}
+
+struct NativeEnumAccess<'a, 'de> {
+    decoder: &'a mut Decoder<'de>,
+    variant: &'static str,
+    numeric: bool,
+}
+impl<'a, 'de> EnumAccess<'de> for NativeEnumAccess<'a, 'de> {
+    type Error = Error;
+    type Variant = Self;
+    fn variant_seed<V: DeserializeSeed<'de>>(self, seed: V) -> Result<(V::Value, Self)> {
+        let variant = seed.deserialize(
+            ::serde::de::value::BorrowedStrDeserializer::<Error>::new(self.variant),
+        )?;
+        Ok((variant, self))
+    }
+}
+impl<'de> VariantAccess<'de> for NativeEnumAccess<'_, 'de> {
+    type Error = Error;
+    fn unit_variant(self) -> Result<()> {
+        Ok(())
+    }
+    fn newtype_variant_seed<T: DeserializeSeed<'de>>(self, seed: T) -> Result<T::Value> {
+        if self.numeric {
+            return Err(decode_error());
+        }
+        seed.deserialize(Deserializer {
+            decoder: self.decoder,
+            mode: Mode::Fields,
+            type_info: None,
+        })
+    }
+    fn tuple_variant<V: Visitor<'de>>(self, len: usize, visitor: V) -> Result<V::Value> {
+        if self.numeric {
+            return Err(decode_error());
+        }
+        Deserializer {
+            decoder: self.decoder,
+            mode: Mode::Fields,
+            type_info: None,
+        }
+        .structure(len, visitor)
+    }
+    fn struct_variant<V: Visitor<'de>>(
+        self,
+        fields: &'static [&'static str],
+        visitor: V,
+    ) -> Result<V::Value> {
+        self.tuple_variant(fields.len(), visitor)
     }
 }
 

@@ -1,5 +1,5 @@
 use mssf_transport::message::Message;
-use mssf_transport::serialization::serde::{NativeType, ObjectArray, Pointer, Typed};
+use mssf_transport::serialization::serde::{FixedTag, NativeEnum, ObjectArray, Pointer};
 use serde::{Deserialize, Serialize};
 
 use crate::{
@@ -82,17 +82,16 @@ pub(crate) fn decode_reply(message: &Message) -> Result<NodeHealth> {
         _list: ObjectArray<Vec<ForbiddenListItem>>,
         item: Pointer<HealthWire>,
     }
-    let result =
-        crate::query_protocol::decode::<crate::query_protocol::TaggedPayload<ItemWire, 16>, _>(
-            &message.body,
-            false,
-            |crate::query_protocol::TaggedPayload(wire)| {
-                wire.item
-                    .0
-                    .ok_or(Error::Protocol("null node health item"))?
-                    .into_health()
-            },
-        )?;
+    let result = crate::query_protocol::decode::<FixedTag<ItemWire, 16>, _>(
+        &message.body,
+        false,
+        |FixedTag(wire)| {
+            wire.item
+                .0
+                .ok_or(Error::Protocol("null node health item"))?
+                .into_health()
+        },
+    )?;
     if result.kind != 1 || result.paging.is_some() {
         return Err(Error::Protocol("node health result is not an unpaged Item"));
     }
@@ -109,13 +108,13 @@ impl<'de> Deserialize<'de> for ForbiddenListItem {
 }
 #[derive(Deserialize)]
 struct EvaluationSlot {
-    value: Pointer<Typed<HealthEvaluation>>,
+    value: Pointer<NativeEnum<EvaluationWire>>,
 }
 #[derive(Deserialize)]
 struct HealthWire {
     node_name: String,
     health_events: ObjectArray<Vec<EventWire>>,
-    aggregated_health_state: i64,
+    aggregated_health_state: HealthState,
     unhealthy_evaluations: ObjectArray<Vec<EvaluationSlot>>,
 }
 impl HealthWire {
@@ -123,7 +122,7 @@ impl HealthWire {
         Ok(NodeHealth {
             node_name: self.node_name,
             health_events: self.health_events.0.into_iter().map(Into::into).collect(),
-            aggregated_health_state: HealthState::from_raw(self.aggregated_health_state),
+            aggregated_health_state: self.aggregated_health_state,
             unhealthy_evaluations: self
                 .unhealthy_evaluations
                 .0
@@ -133,7 +132,7 @@ impl HealthWire {
                          value: Pointer(value),
                      }| {
                         value
-                            .map(|Typed(value)| value)
+                            .map(|NativeEnum(value)| value.into())
                             .ok_or(Error::Protocol("null health evaluation"))
                     },
                 )
@@ -141,41 +140,26 @@ impl HealthWire {
         })
     }
 }
-impl NativeType for HealthEvaluation {
-    fn type_info(&self) -> mssf_transport::Result<&[u8]> {
-        match self {
-            Self::Event(_) => Ok(&[1, 0, 0, 0]),
-        }
-    }
-    fn deserialize_fields<'de, D: serde::Deserializer<'de>>(
-        tag: &[u8],
-        d: D,
-    ) -> std::result::Result<Self, D::Error> {
-        if tag != 1i32.to_le_bytes() {
-            return Err(serde::de::Error::custom(
-                "unsupported health evaluation dynamic kind",
-            ));
-        }
-        #[derive(Deserialize)]
-        struct Evaluation {
-            kind: i64,
-            description: String,
-            unhealthy_event: EventWire,
-            consider_warning_as_error: bool,
-            aggregated_health_state: i64,
-        }
-        let wire = Evaluation::deserialize(d)?;
-        if wire.kind != 1 {
-            return Err(serde::de::Error::custom(
-                "health evaluation tag and kind disagree",
-            ));
-        }
-        Ok(Self::Event(EventHealthEvaluation {
+#[derive(Deserialize)]
+enum EvaluationWire {
+    #[serde(rename = "1")]
+    Event(EventEvaluationWire),
+}
+#[derive(Deserialize)]
+struct EventEvaluationWire {
+    description: String,
+    unhealthy_event: EventWire,
+    consider_warning_as_error: bool,
+    aggregated_health_state: HealthState,
+}
+impl From<EvaluationWire> for HealthEvaluation {
+    fn from(EvaluationWire::Event(wire): EvaluationWire) -> Self {
+        Self::Event(EventHealthEvaluation {
             description: wire.description,
             unhealthy_event: wire.unhealthy_event.into(),
             consider_warning_as_error: wire.consider_warning_as_error,
-            aggregated_health_state: HealthState::from_raw(wire.aggregated_health_state),
-        }))
+            aggregated_health_state: wire.aggregated_health_state,
+        })
     }
 }
 
@@ -184,7 +168,7 @@ struct EventWire {
     source_id: String,
     property: String,
     time_to_live_ticks: i64,
-    health_state: i64,
+    health_state: HealthState,
     description: String,
     sequence_number: i64,
     source_utc_timestamp: i64,
@@ -202,7 +186,7 @@ impl From<EventWire> for HealthEvent {
             source_id: wire.source_id,
             property: wire.property,
             time_to_live_ticks: wire.time_to_live_ticks,
-            health_state: HealthState::from_raw(wire.health_state),
+            health_state: wire.health_state,
             description: wire.description,
             sequence_number: wire.sequence_number,
             source_utc_timestamp: NodeTimestamp(wire.source_utc_timestamp),
