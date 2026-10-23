@@ -590,6 +590,12 @@ assert_eq!(from_slice::<ListenWire>(&bytes).unwrap(), value);
 | `Guid([u8; 16])` | Native GUID metadata and Windows field-order bytes, e.g. `Uuid::to_bytes_le()`, not UUID network order or byte-array metadata. |
 | `ByteArray<T>` | Native byte-array metadata; encode Vec/slice/array bytes, decode `ByteArray<Vec<u8>>`. |
 | `ObjectArray<T>` | Native object-array metadata even when empty; encode a Vec/slice of struct-shaped elements, decode `ObjectArray<Vec<Row>>`. |
+| `CountedStrings<T>` | Native UInt32 count followed by inline strings, including an explicit zero count. Encode Vec/slice strings; decode `CountedStrings<Vec<String>>`. Not string-array or object-array metadata. |
+| `Pointer<T>` | Explicit nullable native object pointer. `None` writes the empty-pointer marker; a plain struct target requires empty type information. |
+| `Typed<T>` / `NativeType` | Native tagged object; dispatch receives bounded raw type information before reading the ordered fields. Supports roots, nested objects, object-array elements and `Pointer<Typed<T>>`. |
+| `Inline<T>` | Struct fields in the current object scope without a nested object. |
+| `Derived<T>` | Advance to the next native scope, then read/write the struct's fields inline. |
+| `Trailing<T>` | A positional suffix: `None` is genuine absence at the current scope end, not a null pointer. Present malformed data remains an error. |
 | `to_fields` / `from_fields` | Fixed ordered struct fields inside an already-open codec object, without introducing or closing an object/scope. |
 | `bitflags` with Serde derives | Underlying supported integer, without an object wrapper or flag-name string; unknown bits survive decoding. Match the native field's width and signedness. |
 
@@ -629,13 +635,30 @@ Ordinary enum indices are not native signed-64-bit codes: wire DTOs use i64
 with operation-specific conversion. Empty container kind is never inferred
 from the sequence length or first element.
 
-Pointers, type information, recognized polymorphic kinds, base/derived scopes
-and compatibility suffixes remain explicit `Encoder`/`Decoder` operations.
-Bridge their compatible ordered bodies with `to_fields` / `from_fields`;
-validate tags/kinds and use `is_scope_end()` for genuinely absent suffixes.
-An Option/default is not a substitute for pointer metadata or an absent
-trailing field. `from_fields` leaves following fields available and does not
-finish the enclosing object. Encoder errors roll back the failed bridge's
+Native structure is explicit in the wire DTO rather than inferred from ordinary
+Option/Vec/enum types. For example, a native object array of evaluation wrappers
+uses `ObjectArray<Vec<Slot>>` with a named `struct Slot { value:
+Pointer<Typed<Evaluation>> }`; a transparent one-field tuple struct would omit
+the required outer object.
+
+Implement `NativeType::deserialize_fields` to select the supported schema from
+its tag, deserialize the ordered fields using the supplied Serde deserializer,
+and validate tag/kind agreement. `type_info` supplies the raw encoding tag or
+returns an error for unsupported values. Unknown structural tags are not
+silently mapped to a default enum variant. The same machinery handles node
+safety checks and health evaluations; ordinary numeric enums remain i64 fields
+with explicit conversion policies.
+
+`Inline` and `Derived` require an open object. `Trailing` is only for positional
+suffixes: once one suffix is omitted, all following fields in that scope must
+also be omitted. `Trailing<Pointer<T>>` distinguishes an absent suffix from a
+present null pointer. Defaults are applied by conversion code after decoding,
+never by catching malformed input. `Derived` skips supported unread base fields
+using the codec before entering the next scope.
+
+`to_fields` / `from_fields` remain escape hatches for partial schemas and policies
+that need incremental decoding. They leave following fields available and do
+not finish the enclosing object. Encoder errors roll back the failed bridge's
 bytes; decoder errors do not rewind input.
 
 Only fixed positional schemas are wire-preserving. Do not apply flatten,
@@ -648,24 +671,32 @@ connection retirement. Codec errors retain their existing categories.
 Supported unknown trailing values/scopes are skipped, not retained for
 lossless re-emission.
 
-Production adoption includes listen-instance controls and common header
-writers, shared query-request DTOs, ping/NameExists replies, health/event
-fields and application/service scalar blocks/parameter pairs. Header record
-framing/duplicate rules are unchanged. Query argument
-order remains the supplied slice order; QueryAddress is not added to the body.
-Naming URI's inline string-vector, query-result pointer/tag policy, node-list
-structural polymorphism, strict list conversions/deprecated fields/suffix
-defaults, and failure-detail fallbacks remain explicit manual boundaries.
+Production adoption includes listen-instance controls/common header writers,
+query requests/results, ping/NameExists replies, complete node/deactivation/task
+and node-health records, application/service records, naming URI bodies and
+complete optional fault details. Safety checks and health evaluations share
+tagged dispatch. Naming URI encode/decode share one schema using CountedStrings.
+Header record framing/duplicate rules and query argument order are unchanged;
+QueryAddress is not added to the body.
+
+Wire DTO conversion still enforces duplicate node IDs/parameter keys, naming URI
+profile/segment agreement, strict list enums, deprecated fields and service
+kind/persistence consistency. Node paging retains its permissive type-info
+policy; application/service paging requires an empty tag. Payload validation
+precedes reporting an embedded query error so malformed records still retire
+the connection. Actor/action, Item/List invariants and connection policy remain
+outside the serializer. Operation failures retain incremental code/diagnostic
+decoding so a readable nonzero native error survives a malformed diagnostic.
 
 See the [backend contract and compiling example][native-serde],
 [transport payloads][serde-messages], [query DTOs][serde-query],
 [health conversion][serde-health] and [list conversion][serde-lists].
 
-[native-serde]: ../../crates/libs/mssf-transport/src/serialization/serde.rs#L1-L198
+[native-serde]: ../../crates/libs/mssf-transport/src/serialization/serde.rs
 [serde-messages]: ../../crates/libs/mssf-transport/src/message.rs#L12-L123
-[serde-query]: ../../crates/libs/mssf-client/src/query_protocol.rs#L13-L39
-[serde-health]: ../../crates/libs/mssf-client/src/health_protocol.rs#L71-L151
-[serde-lists]: ../../crates/libs/mssf-client/src/list_protocol.rs#L195-L312
+[serde-query]: ../../crates/libs/mssf-client/src/query_protocol.rs
+[serde-health]: ../../crates/libs/mssf-client/src/health_protocol.rs
+[serde-lists]: ../../crates/libs/mssf-client/src/list_protocol.rs
 
 ## 5. Offline and native qualification
 

@@ -4,13 +4,13 @@ use std::collections::BTreeMap;
 
 use mssf_transport::{
     message::Message,
-    serialization::{serde::from_fields, Decoder, MAX_COLLECTION_COUNT},
+    serialization::serde::{ObjectArray, Trailing, Typed},
 };
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    applications::*, query_arguments::QueryArguments, query_protocol::Query, services::*, Error,
-    HealthState, Paging, Result,
+    applications::*, protocol::NamingUriWire, query_arguments::QueryArguments,
+    query_protocol::Query, services::*, Error, HealthState, Paging, Result,
 };
 
 fn type_selector(value: &str) -> Result<&str> {
@@ -113,11 +113,19 @@ impl Query for ServiceQueryDescription {
 }
 
 pub(crate) fn decode_applications(message: &Message) -> Result<ApplicationListPage> {
-    crate::query_protocol::decode_list(message, 4, true, application)
+    crate::query_protocol::decode_list::<ApplicationWire, _, 4>(
+        message,
+        true,
+        ApplicationWire::into_application,
+    )
 }
 
 pub(crate) fn decode_services(message: &Message) -> Result<ServiceListPage> {
-    crate::query_protocol::decode_list(message, 2, true, service)
+    crate::query_protocol::decode_list::<ServiceWire, _, 2>(
+        message,
+        true,
+        ServiceWire::into_service,
+    )
 }
 
 fn health(raw: i64) -> Result<HealthState> {
@@ -127,50 +135,11 @@ fn health(raw: i64) -> Result<HealthState> {
     }
 }
 
-fn name(decoder: &mut Decoder<'_>) -> Result<String> {
-    decoder.typed_object(|decoder, tag| {
-        if !tag.is_empty()
-            || decoder.i64()? != 1
-            || decoder.string()? != "fabric"
-            || !decoder.string()?.is_empty()
-            || decoder.i64()? != 0
-            || !decoder.string()?.is_empty()
-            || decoder.i32()? != -1
-        {
-            return Err(Error::Protocol("unsupported native naming URI profile"));
-        }
-        let path = decoder.string()?;
-        if !decoder.string()?.is_empty() || !decoder.string()?.is_empty() {
-            return Err(Error::Protocol("naming URI has query or fragment"));
-        }
-        let count = decoder.u32()? as usize;
-        if count > MAX_COLLECTION_COUNT {
-            return Err(Error::Protocol("naming URI segment count exceeds bound"));
-        }
-        let value = format!("fabric:{path}");
-        crate::protocol::validate_name(&value)
-            .map_err(|_| Error::Protocol("unsupported native naming URI value"))?;
-        let mut segments = path[1..].split('/');
-        for _ in 0..count {
-            if segments.next() != Some(decoder.string()?.as_str()) {
-                return Err(Error::Protocol("naming URI segments disagree with path"));
-            }
-        }
-        if segments.next().is_some() {
-            return Err(Error::Protocol(
-                "naming URI segment count disagrees with path",
-            ));
-        }
-        Ok(value)
-    })
-}
-
-fn parameters(decoder: &mut Decoder<'_>) -> Result<BTreeMap<String, String>> {
-    #[derive(Deserialize)]
-    struct Pair(String, String);
-    let pairs = decoder.object_array(from_fields::<Pair>)?;
+#[derive(Deserialize)]
+struct ParameterPair(String, String);
+fn parameters(pairs: ObjectArray<Vec<ParameterPair>>) -> Result<BTreeMap<String, String>> {
     let mut values = BTreeMap::new();
-    for Pair(key, value) in pairs {
+    for ParameterPair(key, value) in pairs.0 {
         if values.insert(key, value).is_some() {
             return Err(Error::Protocol("duplicate application parameter"));
         }
@@ -178,111 +147,123 @@ fn parameters(decoder: &mut Decoder<'_>) -> Result<BTreeMap<String, String>> {
     Ok(values)
 }
 
-fn application(decoder: &mut Decoder<'_>) -> Result<Application> {
-    #[derive(Deserialize)]
-    struct Fields {
-        type_name: String,
-        type_version: String,
-        status: i64,
-        health: i64,
-    }
-    let name = name(decoder)?;
-    let fields: Fields = from_fields(decoder)?;
-    let status = match fields.status {
-        0 => ApplicationStatus::Invalid,
-        1 => ApplicationStatus::Ready,
-        2 => ApplicationStatus::Upgrading,
-        3 => ApplicationStatus::Creating,
-        4 => ApplicationStatus::Deleting,
-        5 => ApplicationStatus::Failed,
-        _ => return Err(Error::Protocol("unsupported application status")),
-    };
-    let health_state = health(fields.health)?;
-    let parameters = parameters(decoder)?;
-    if !decoder.is_scope_end()? && !decoder.string()?.is_empty() {
-        return Err(Error::Protocol(
-            "nonempty deprecated application upgrade version",
-        ));
-    }
-    if !decoder.is_scope_end()? && !self::parameters(decoder)?.is_empty() {
-        return Err(Error::Protocol(
-            "nonempty deprecated application upgrade parameters",
-        ));
-    }
-    let definition_kind = if decoder.is_scope_end()? {
-        ApplicationDefinitionKind::Invalid
-    } else {
-        match decoder.i64()? {
-            0 => ApplicationDefinitionKind::ServiceFabricApplicationDescription,
-            1 => ApplicationDefinitionKind::Compose,
-            2 => ApplicationDefinitionKind::MeshApplicationDescription,
-            65535 => ApplicationDefinitionKind::Invalid,
-            _ => return Err(Error::Protocol("unsupported application definition kind")),
+#[derive(Deserialize)]
+struct ApplicationWire {
+    name: Typed<NamingUriWire>,
+    type_name: String,
+    type_version: String,
+    status: i64,
+    health: i64,
+    parameters: ObjectArray<Vec<ParameterPair>>,
+    deprecated_version: Trailing<String>,
+    deprecated_parameters: Trailing<ObjectArray<Vec<ParameterPair>>>,
+    definition_kind: Trailing<i64>,
+}
+impl ApplicationWire {
+    fn into_application(self) -> Result<Application> {
+        let name = self.name.0.into_name()?;
+        let status = match self.status {
+            0 => ApplicationStatus::Invalid,
+            1 => ApplicationStatus::Ready,
+            2 => ApplicationStatus::Upgrading,
+            3 => ApplicationStatus::Creating,
+            4 => ApplicationStatus::Deleting,
+            5 => ApplicationStatus::Failed,
+            _ => return Err(Error::Protocol("unsupported application status")),
+        };
+        let health_state = health(self.health)?;
+        let parameters = parameters(self.parameters)?;
+        if self
+            .deprecated_version
+            .0
+            .is_some_and(|value| !value.is_empty())
+        {
+            return Err(Error::Protocol(
+                "nonempty deprecated application upgrade version",
+            ));
         }
-    };
-    Ok(Application {
-        name,
-        type_name: fields.type_name,
-        type_version: fields.type_version,
-        status,
-        health_state,
-        parameters,
-        definition_kind,
-    })
+        if self
+            .deprecated_parameters
+            .0
+            .is_some_and(|value| !value.0.is_empty())
+        {
+            return Err(Error::Protocol(
+                "nonempty deprecated application upgrade parameters",
+            ));
+        }
+        let definition_kind = match self.definition_kind.0 {
+            Some(0) => ApplicationDefinitionKind::ServiceFabricApplicationDescription,
+            Some(1) => ApplicationDefinitionKind::Compose,
+            Some(2) => ApplicationDefinitionKind::MeshApplicationDescription,
+            None | Some(65535) => ApplicationDefinitionKind::Invalid,
+            _ => return Err(Error::Protocol("unsupported application definition kind")),
+        };
+        Ok(Application {
+            name,
+            type_name: self.type_name,
+            type_version: self.type_version,
+            status,
+            health_state,
+            parameters,
+            definition_kind,
+        })
+    }
 }
 
-fn service(decoder: &mut Decoder<'_>) -> Result<Service> {
-    #[derive(Deserialize)]
-    struct Fields {
-        type_name: String,
-        manifest_version: String,
-        persisted: bool,
-        health: i64,
-    }
-    let raw_kind = decoder.i64()?;
-    let name = name(decoder)?;
-    let fields: Fields = from_fields(decoder)?;
-    let kind = match (raw_kind, fields.persisted) {
-        (1, false) => ServiceKind::Stateless,
-        (2, has_persisted_state) => ServiceKind::Stateful {
-            has_persisted_state,
-        },
-        _ => return Err(Error::Protocol("unsupported service kind/persistence")),
-    };
-    let health_state = health(fields.health)?;
-    let status = if decoder.is_scope_end()? {
-        ServiceStatus::Unknown
-    } else {
-        match decoder.i64()? {
-            0 => ServiceStatus::Unknown,
-            1 => ServiceStatus::Active,
-            2 => ServiceStatus::Upgrading,
-            3 => ServiceStatus::Deleting,
-            4 => ServiceStatus::Creating,
-            5 => ServiceStatus::Failed,
+#[derive(Deserialize)]
+struct ServiceWire {
+    kind: i64,
+    name: Typed<NamingUriWire>,
+    type_name: String,
+    manifest_version: String,
+    persisted: bool,
+    health: i64,
+    status: Trailing<i64>,
+    is_service_group: Trailing<bool>,
+}
+impl ServiceWire {
+    fn into_service(self) -> Result<Service> {
+        let name = self.name.0.into_name()?;
+        let kind = match (self.kind, self.persisted) {
+            (1, false) => ServiceKind::Stateless,
+            (2, has_persisted_state) => ServiceKind::Stateful {
+                has_persisted_state,
+            },
+            _ => return Err(Error::Protocol("unsupported service kind/persistence")),
+        };
+        let health_state = health(self.health)?;
+        let status = match self.status.0 {
+            None | Some(0) => ServiceStatus::Unknown,
+            Some(1) => ServiceStatus::Active,
+            Some(2) => ServiceStatus::Upgrading,
+            Some(3) => ServiceStatus::Deleting,
+            Some(4) => ServiceStatus::Creating,
+            Some(5) => ServiceStatus::Failed,
             _ => return Err(Error::Protocol("unsupported service status")),
-        }
-    };
-    let is_service_group = if decoder.is_scope_end()? {
-        false
-    } else {
-        decoder.boolean()?
-    };
-    Ok(Service {
-        name,
-        type_name: fields.type_name,
-        manifest_version: fields.manifest_version,
-        kind,
-        health_state,
-        status,
-        is_service_group,
-    })
+        };
+        Ok(Service {
+            name,
+            type_name: self.type_name,
+            manifest_version: self.manifest_version,
+            kind,
+            health_state,
+            status,
+            is_service_group: self.is_service_group.0.unwrap_or(false),
+        })
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use mssf_transport::serialization::Encoder;
+    use mssf_transport::serialization::{serde::from_fields, Decoder, Encoder};
+
+    fn application(decoder: &mut Decoder<'_>) -> Result<Application> {
+        from_fields::<ApplicationWire>(decoder)?.into_application()
+    }
+    fn service(decoder: &mut Decoder<'_>) -> Result<Service> {
+        from_fields::<ServiceWire>(decoder)?.into_service()
+    }
 
     fn application_base(e: &mut Encoder) -> Result<()> {
         uri(e)?;

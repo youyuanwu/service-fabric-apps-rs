@@ -10,8 +10,10 @@
 //! integer widths are unsupported. Owned decoding is supported; strings/bytes
 //! are not borrowed from the UTF-16/native input.
 //!
-//! Native pointers, tags, scopes and versioned suffixes use the explicit codec
-//! plus [`to_fields`]/[`from_fields`]. An ordinary Option is **not** a pointer or
+//! Native pointers, tags, scopes and versioned suffixes use explicit adapters:
+//! [`Pointer`], [`Typed`]/[`NativeType`], [`Inline`], [`Derived`] and [`Trailing`].
+//! [`CountedStrings`] handles UInt32-counted string sequences.
+//! An ordinary Option is **not** a pointer or
 //! an absent suffix. Default/skip/flatten/tagging attributes and shape-changing
 //! custom serializers are outside the positional wire-preserving contract;
 //! attributes invisible to a format backend cannot universally be detected.
@@ -26,7 +28,7 @@
 //! assert_eq!(from_slice::<Payload>(&to_vec(&value).unwrap()).unwrap(), value);
 //! ```
 
-use super::{Decoder, Encoder, MAX_OBJECT_SIZE, MAX_STRING_UNITS};
+use super::{Decoder, Encoder, MAX_COLLECTION_COUNT, MAX_OBJECT_SIZE, MAX_STRING_UNITS};
 use crate::{Error, Result};
 use ::serde::{
     de::{DeserializeSeed, SeqAccess, Visitor},
@@ -35,8 +37,17 @@ use ::serde::{
 };
 use std::fmt;
 
+mod adapters;
+pub use adapters::{CountedStrings, Derived, Inline, NativeType, Pointer, Trailing, Typed};
+
 const GUID_ADAPTER: &str = "$fabric::Guid";
 const ARRAY_ADAPTER: &str = "$fabric::ObjectArray";
+const POINTER_ADAPTER: &str = "$fabric::Pointer";
+const TYPED_ADAPTER: &str = "$fabric::Typed";
+const INLINE_ADAPTER: &str = "$fabric::Inline";
+const DERIVED_ADAPTER: &str = "$fabric::Derived";
+const TRAILING_ADAPTER: &str = "$fabric::Trailing";
+const STRINGS_ADAPTER: &str = "$fabric::CountedStrings";
 
 /// GUID bytes in native Windows field order (e.g. `Uuid::to_bytes_le()`).
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -98,6 +109,9 @@ impl<'de> Visitor<'de> for BytesVisitor {
         value: Vec<u8>,
     ) -> std::result::Result<Vec<u8>, E> {
         Ok(value)
+    }
+    fn visit_bytes<E: ::serde::de::Error>(self, value: &[u8]) -> std::result::Result<Vec<u8>, E> {
+        Ok(value.to_vec())
     }
 }
 impl<'de> Deserialize<'de> for ByteArray {
@@ -164,6 +178,7 @@ pub fn from_slice<'de, T: Deserialize<'de>>(bytes: &'de [u8]) -> Result<T> {
     let value = T::deserialize(Deserializer {
         decoder: &mut decoder,
         mode: Mode::Value,
+        type_info: None,
     })?;
     decoder.finish()?;
     Ok(value)
@@ -200,6 +215,7 @@ pub fn from_fields<'de, T: Deserialize<'de>>(decoder: &mut Decoder<'de>) -> Resu
     T::deserialize(Deserializer {
         decoder,
         mode: Mode::Fields,
+        type_info: None,
     })
 }
 
@@ -217,6 +233,14 @@ enum Mode {
     Guid,
     Array,
     Object,
+    Pointer,
+    Typed,
+    TypedPointer,
+    TypeInfo,
+    Contents,
+    Trailing,
+    Strings,
+    StringElement,
 }
 
 struct Serializer<'a> {
@@ -285,11 +309,11 @@ impl<'a> ::serde::Serializer for Serializer<'a> {
         serialize_i8(v: i8); serialize_i16(v: i16); serialize_u8(v: u8);
         serialize_i128(v: i128); serialize_u128(v: u128);
         serialize_f32(v: f32); serialize_f64(v: f64); serialize_char(v: char);
-        serialize_none(); serialize_unit(); serialize_unit_struct(n: &'static str);
+        serialize_unit(); serialize_unit_struct(n: &'static str);
         serialize_unit_variant(n: &'static str, i: u32, v: &'static str);
     }
     fn serialize_str(self, value: &str) -> Result<()> {
-        if self.mode != Mode::Value {
+        if !matches!(self.mode, Mode::Value | Mode::StringElement) {
             return Err(encode_error());
         }
         self.encoder.string(value)
@@ -314,11 +338,27 @@ impl<'a> ::serde::Serializer for Serializer<'a> {
                 self.encoder.guid(bytes);
                 Ok(())
             }
+            Mode::TypeInfo => self.encoder.begin_object(value).map(|_| ()),
             _ => Err(encode_error()),
         }
     }
-    fn serialize_some<T: Serialize + ?Sized>(self, _: &T) -> Result<()> {
-        Err(encode_error())
+    fn serialize_none(self) -> Result<()> {
+        match self.mode {
+            Mode::Pointer => self.encoder.pointer(None, |_| unreachable!()),
+            Mode::Trailing => Ok(()),
+            _ => Err(encode_error()),
+        }
+    }
+    fn serialize_some<T: Serialize + ?Sized>(self, value: &T) -> Result<()> {
+        let mode = match self.mode {
+            Mode::Pointer => Mode::Pointer,
+            Mode::Trailing => Mode::Value,
+            _ => return Err(encode_error()),
+        };
+        value.serialize(Self {
+            encoder: self.encoder,
+            mode,
+        })
     }
     fn serialize_newtype_struct<T: Serialize + ?Sized>(
         self,
@@ -328,7 +368,22 @@ impl<'a> ::serde::Serializer for Serializer<'a> {
         let mode = match (self.mode, name) {
             (Mode::Value, GUID_ADAPTER) => Mode::Guid,
             (Mode::Value, ARRAY_ADAPTER) => Mode::Array,
-            (_, GUID_ADAPTER | ARRAY_ADAPTER) => return Err(encode_error()),
+            (Mode::Value, POINTER_ADAPTER) => Mode::Pointer,
+            (Mode::Value | Mode::Object, TYPED_ADAPTER) => Mode::Typed,
+            (Mode::Pointer, TYPED_ADAPTER) => Mode::TypedPointer,
+            (Mode::Value, TRAILING_ADAPTER) if self.encoder.depth > 0 => Mode::Trailing,
+            (Mode::Value, INLINE_ADAPTER | DERIVED_ADAPTER) if self.encoder.depth > 0 => {
+                if name == DERIVED_ADAPTER {
+                    self.encoder.next_scope()?;
+                }
+                Mode::Fields
+            }
+            (Mode::Value, STRINGS_ADAPTER) => Mode::Strings,
+            (
+                _,
+                GUID_ADAPTER | ARRAY_ADAPTER | POINTER_ADAPTER | TYPED_ADAPTER | TRAILING_ADAPTER
+                | INLINE_ADAPTER | DERIVED_ADAPTER | STRINGS_ADAPTER,
+            ) => return Err(encode_error()),
             _ => self.mode,
         };
         value.serialize(Self {
@@ -346,19 +401,27 @@ impl<'a> ::serde::Serializer for Serializer<'a> {
         Err(encode_error())
     }
     fn serialize_seq(self, len: Option<usize>) -> Result<Self::SerializeSeq> {
-        if self.mode != Mode::Array {
+        if !matches!(self.mode, Mode::Array | Mode::Strings) {
             return Err(encode_error());
         }
         let len = len.ok_or_else(encode_error)?;
         let start = self.encoder.bytes.len();
         let depth = self.encoder.depth;
-        self.encoder.object_array_header(len)?;
+        let framing = if self.mode == Mode::Array {
+            self.encoder.object_array_header(len)?;
+            Framing::Array
+        } else {
+            if len > MAX_COLLECTION_COUNT {
+                return Err(Error::InvalidInput("counted-string limit exceeded"));
+            }
+            self.encoder.u32(len as u32);
+            Framing::Strings
+        };
         Ok(Compound {
             encoder: self.encoder,
             start,
             depth,
-            object: false,
-            inline: false,
+            framing,
             remaining: len,
             complete: false,
         })
@@ -403,33 +466,67 @@ impl<'a> ::serde::Serializer for Serializer<'a> {
 }
 impl<'a> Serializer<'a> {
     fn compound(self, len: usize) -> Result<Compound<'a>> {
-        if !matches!(self.mode, Mode::Value | Mode::Fields | Mode::Object) {
+        if !matches!(
+            self.mode,
+            Mode::Value
+                | Mode::Fields
+                | Mode::Object
+                | Mode::Pointer
+                | Mode::Typed
+                | Mode::TypedPointer
+        ) {
             return Err(encode_error());
         }
         let depth = self.encoder.depth;
-        let object = self.mode != Mode::Fields;
-        let start = if object {
-            self.encoder.begin_object(&[])?
-        } else {
-            self.encoder.bytes.len()
+        let start = self.encoder.bytes.len();
+        let framing = match self.mode {
+            Mode::Fields => Framing::Fields,
+            Mode::Typed | Mode::TypedPointer => {
+                if len != 2 {
+                    return Err(encode_error());
+                }
+                let pointer = self.mode == Mode::TypedPointer;
+                if pointer {
+                    self.encoder.bytes.push(super::POINTER);
+                }
+                Framing::Typed { pointer }
+            }
+            Mode::Pointer => {
+                self.encoder.bytes.push(super::POINTER);
+                if let Err(error) = self.encoder.begin_object(&[]) {
+                    self.encoder.bytes.truncate(start);
+                    return Err(error);
+                }
+                Framing::Object { pointer: true }
+            }
+            _ => {
+                self.encoder.begin_object(&[])?;
+                Framing::Object { pointer: false }
+            }
         };
         Ok(Compound {
             encoder: self.encoder,
             start,
             depth,
-            object,
-            inline: !object,
+            framing,
             remaining: len,
             complete: false,
         })
     }
 }
+#[derive(Clone, Copy)]
+enum Framing {
+    Object { pointer: bool },
+    Typed { pointer: bool },
+    Fields,
+    Array,
+    Strings,
+}
 struct Compound<'a> {
     encoder: &'a mut Encoder,
     start: usize,
     depth: usize,
-    object: bool,
-    inline: bool,
+    framing: Framing,
     remaining: usize,
     complete: bool,
 }
@@ -439,16 +536,18 @@ impl Compound<'_> {
             return Err(encode_error());
         }
         self.remaining -= 1;
-        let mode = if self.object || self.inline {
-            Mode::Value
-        } else {
-            Mode::Object
+        let mode = match self.framing {
+            Framing::Array => Mode::Object,
+            Framing::Strings => Mode::StringElement,
+            Framing::Typed { .. } if self.remaining == 1 => Mode::TypeInfo,
+            Framing::Typed { .. } => Mode::Fields,
+            _ => Mode::Value,
         };
         value.serialize(Serializer {
             encoder: self.encoder,
             mode,
         })?;
-        if (self.object || self.inline || self.depth > 0)
+        if (!matches!(self.framing, Framing::Array | Framing::Strings) || self.depth > 0)
             && self.encoder.bytes.len() - self.start > MAX_OBJECT_SIZE
         {
             return Err(Error::InvalidInput("object size limit exceeded"));
@@ -459,8 +558,8 @@ impl Compound<'_> {
         if self.remaining != 0 {
             return Err(encode_error());
         }
-        if self.object {
-            self.encoder.end_object(self.start)?;
+        if let Framing::Object { pointer } | Framing::Typed { pointer } = self.framing {
+            self.encoder.end_object(self.start + usize::from(pointer))?;
         }
         self.complete = true;
         Ok(())
@@ -508,6 +607,7 @@ impl SerializeSeq for Compound<'_> {
 struct Deserializer<'a, 'de> {
     decoder: &'a mut Decoder<'de>,
     mode: Mode,
+    type_info: Option<&'de [u8]>,
 }
 
 macro_rules! deserialize_scalar {
@@ -533,7 +633,6 @@ impl<'de> ::serde::Deserializer<'de> for Deserializer<'_, 'de> {
     deserialize_scalar!(deserialize_u32, u32, visit_u32);
     deserialize_scalar!(deserialize_i64, i64, visit_i64);
     deserialize_scalar!(deserialize_u64, u64, visit_u64);
-    deserialize_scalar!(deserialize_string, string, visit_string);
     reject_deserialize!(
         deserialize_any,
         deserialize_i8,
@@ -544,7 +643,6 @@ impl<'de> ::serde::Deserializer<'de> for Deserializer<'_, 'de> {
         deserialize_f32,
         deserialize_f64,
         deserialize_char,
-        deserialize_option,
         deserialize_unit,
         deserialize_map,
         deserialize_identifier,
@@ -552,6 +650,40 @@ impl<'de> ::serde::Deserializer<'de> for Deserializer<'_, 'de> {
     );
     fn deserialize_str<V: Visitor<'de>>(self, visitor: V) -> Result<V::Value> {
         self.deserialize_string(visitor)
+    }
+    fn deserialize_string<V: Visitor<'de>>(self, visitor: V) -> Result<V::Value> {
+        if !matches!(self.mode, Mode::Value | Mode::StringElement) {
+            return Err(decode_error());
+        }
+        visitor.visit_string(self.decoder.string()?)
+    }
+    fn deserialize_option<V: Visitor<'de>>(self, visitor: V) -> Result<V::Value> {
+        match self.mode {
+            Mode::Pointer => {
+                let mut visitor = Some(visitor);
+                let value = self.decoder.pointer(|decoder, type_info| {
+                    visitor
+                        .take()
+                        .ok_or_else(decode_error)?
+                        .visit_some(Deserializer {
+                            decoder,
+                            mode: Mode::Contents,
+                            type_info: Some(type_info),
+                        })
+                })?;
+                match value {
+                    Some(value) => Ok(value),
+                    None => visitor.ok_or_else(decode_error)?.visit_none(),
+                }
+            }
+            Mode::Trailing if self.decoder.is_scope_end()? => visitor.visit_none(),
+            Mode::Trailing => visitor.visit_some(Self {
+                decoder: self.decoder,
+                mode: Mode::Value,
+                type_info: None,
+            }),
+            _ => Err(decode_error()),
+        }
     }
     fn deserialize_bytes<V: Visitor<'de>>(self, visitor: V) -> Result<V::Value> {
         let value = match self.mode {
@@ -572,26 +704,69 @@ impl<'de> ::serde::Deserializer<'de> for Deserializer<'_, 'de> {
         name: &'static str,
         visitor: V,
     ) -> Result<V::Value> {
+        if name == TYPED_ADAPTER {
+            return match self.mode {
+                Mode::Value | Mode::Object => self.decoder.typed_object(|decoder, type_info| {
+                    visitor.visit_seq(TypeAccess {
+                        decoder,
+                        type_info,
+                        remaining: 2,
+                    })
+                }),
+                Mode::Contents => visitor.visit_seq(TypeAccess {
+                    decoder: self.decoder,
+                    type_info: self.type_info.ok_or_else(decode_error)?,
+                    remaining: 2,
+                }),
+                _ => Err(decode_error()),
+            };
+        }
         let mode = match (self.mode, name) {
             (Mode::Value, GUID_ADAPTER) => Mode::Guid,
             (Mode::Value, ARRAY_ADAPTER) => Mode::Array,
-            (_, GUID_ADAPTER | ARRAY_ADAPTER) => return Err(decode_error()),
+            (Mode::Value, POINTER_ADAPTER) => Mode::Pointer,
+            (Mode::Value, TRAILING_ADAPTER) if self.decoder.depth > 0 => Mode::Trailing,
+            (Mode::Value, INLINE_ADAPTER | DERIVED_ADAPTER) if self.decoder.depth > 0 => {
+                if name == DERIVED_ADAPTER {
+                    self.decoder.next_scope()?;
+                }
+                Mode::Fields
+            }
+            (Mode::Value, STRINGS_ADAPTER) => Mode::Strings,
+            (
+                _,
+                GUID_ADAPTER | ARRAY_ADAPTER | POINTER_ADAPTER | TRAILING_ADAPTER | INLINE_ADAPTER
+                | DERIVED_ADAPTER | STRINGS_ADAPTER,
+            ) => return Err(decode_error()),
             _ => self.mode,
         };
         visitor.visit_newtype_struct(Self {
             decoder: self.decoder,
             mode,
+            type_info: self.type_info,
         })
     }
     fn deserialize_seq<V: Visitor<'de>>(self, visitor: V) -> Result<V::Value> {
-        if self.mode != Mode::Array {
+        if !matches!(self.mode, Mode::Array | Mode::Strings) {
             return Err(decode_error());
         }
-        let count = self.decoder.object_array_count()?;
+        let count = if self.mode == Mode::Array {
+            self.decoder.object_array_count()?
+        } else {
+            let count = self.decoder.u32()? as usize;
+            if count > MAX_COLLECTION_COUNT || count > self.decoder.limit - self.decoder.position {
+                return Err(Error::Protocol("counted-string limit or extent exceeded"));
+            }
+            count
+        };
         let mut access = Access {
             decoder: self.decoder,
             remaining: count,
-            objects: true,
+            mode: if self.mode == Mode::Array {
+                Mode::Object
+            } else {
+                Mode::StringElement
+            },
         };
         let value = visitor.visit_seq(&mut access)?;
         if access.remaining != 0 {
@@ -632,17 +807,25 @@ impl<'de> ::serde::Deserializer<'de> for Deserializer<'_, 'de> {
 }
 impl<'de> Deserializer<'_, 'de> {
     fn structure<V: Visitor<'de>>(self, len: usize, visitor: V) -> Result<V::Value> {
-        if !matches!(self.mode, Mode::Value | Mode::Fields | Mode::Object) {
+        if !matches!(
+            self.mode,
+            Mode::Value | Mode::Fields | Mode::Object | Mode::Contents
+        ) {
             return Err(decode_error());
+        }
+        if self.mode == Mode::Contents && self.type_info != Some(&[]) {
+            return Err(Error::Protocol(
+                "unexpected untyped pointer type information",
+            ));
         }
         let read = |decoder: &mut Decoder<'de>| {
             visitor.visit_seq(Access {
                 decoder,
                 remaining: len,
-                objects: false,
+                mode: Mode::Value,
             })
         };
-        if self.mode == Mode::Fields {
+        if matches!(self.mode, Mode::Fields | Mode::Contents) {
             read(self.decoder)
         } else {
             self.decoder.object(read)
@@ -652,7 +835,7 @@ impl<'de> Deserializer<'_, 'de> {
 struct Access<'a, 'de> {
     decoder: &'a mut Decoder<'de>,
     remaining: usize,
-    objects: bool,
+    mode: Mode,
 }
 impl<'de> SeqAccess<'de> for Access<'_, 'de> {
     type Error = Error;
@@ -660,23 +843,47 @@ impl<'de> SeqAccess<'de> for Access<'_, 'de> {
         if self.remaining == 0 {
             return Ok(None);
         }
-        if !self.objects && self.decoder.is_scope_end()? {
-            return Ok(None);
-        }
         self.remaining -= 1;
         seed.deserialize(Deserializer {
             decoder: self.decoder,
-            mode: if self.objects {
-                Mode::Object
-            } else {
-                Mode::Value
-            },
+            mode: self.mode,
+            type_info: None,
         })
         .map(Some)
     }
     fn size_hint(&self) -> Option<usize> {
         // Do not turn an advertised count or schema field count into a reservation.
         None
+    }
+}
+
+struct TypeAccess<'a, 'de> {
+    decoder: &'a mut Decoder<'de>,
+    type_info: &'de [u8],
+    remaining: usize,
+}
+impl<'de> SeqAccess<'de> for TypeAccess<'_, 'de> {
+    type Error = Error;
+    fn next_element_seed<T: DeserializeSeed<'de>>(&mut self, seed: T) -> Result<Option<T::Value>> {
+        match self.remaining {
+            2 => {
+                self.remaining -= 1;
+                seed.deserialize(::serde::de::value::BorrowedBytesDeserializer::<Error>::new(
+                    self.type_info,
+                ))
+                .map(Some)
+            }
+            1 => {
+                self.remaining -= 1;
+                seed.deserialize(Deserializer {
+                    decoder: self.decoder,
+                    mode: Mode::Fields,
+                    type_info: None,
+                })
+                .map(Some)
+            }
+            _ => Ok(None),
+        }
     }
 }
 
