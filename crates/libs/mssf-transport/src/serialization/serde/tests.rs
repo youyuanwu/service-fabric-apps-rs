@@ -1,6 +1,7 @@
 use super::*;
 use crate::serialization::{MAX_COLLECTION_COUNT, MAX_DEPTH, MAX_STRING_UNITS};
 use ::serde::ser::SerializeStruct;
+use std::{cell::Cell, fmt::Write};
 
 #[derive(Debug, Serialize, Deserialize, PartialEq)]
 struct Row {
@@ -173,6 +174,107 @@ fn failed_fields_and_nested_objects_roll_back_prior_bytes_and_depth() {
     .unwrap();
     assert_eq!(e.finish(), old.finish());
     assert!(to_vec(&Bad { good: 1, bad: 0.0 }).is_err());
+}
+
+#[test]
+fn generated_display_is_bounded_before_buffering_and_preserves_native_bytes() {
+    struct Generated {
+        text: &'static str,
+        count: usize,
+        writes: Cell<usize>,
+        swallow: bool,
+    }
+    impl fmt::Display for Generated {
+        fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+            for _ in 0..self.count {
+                self.writes.set(self.writes.get() + 1);
+                let result = f.write_str(self.text);
+                if !self.swallow {
+                    result?;
+                }
+            }
+            Ok(())
+        }
+    }
+    impl Serialize for Generated {
+        fn serialize<S: ::serde::Serializer>(
+            &self,
+            serializer: S,
+        ) -> std::result::Result<S::Ok, S::Error> {
+            serializer.collect_str(self)
+        }
+    }
+    for (text, count) in [
+        ("a", MAX_STRING_UNITS),
+        ("é", MAX_STRING_UNITS),
+        ("🦀", MAX_STRING_UNITS / 2),
+    ] {
+        let value = Generated {
+            text,
+            count,
+            writes: Cell::new(0),
+            swallow: false,
+        };
+        assert_eq!(
+            to_vec(&value).unwrap(),
+            to_vec(&text.repeat(count)).unwrap()
+        );
+        let over = Generated {
+            count: count + 1,
+            ..value
+        };
+        assert!(matches!(to_vec(&over), Err(Error::InvalidInput(_))));
+        assert_eq!(over.writes.get(), count * 2 + 1); // valid call then early rejected call
+    }
+    let generated = Generated {
+        text: "a",
+        count: 1_000_000,
+        writes: Cell::new(0),
+        swallow: false,
+    };
+    assert!(to_vec(&generated).is_err());
+    assert_eq!(generated.writes.get(), MAX_STRING_UNITS + 1);
+    // An oversized single write must fail before copying or reserving a buffer.
+    let mut bounded = BoundedText::default();
+    assert!(bounded
+        .write_str(&"a".repeat(MAX_STRING_UNITS * 3 + 1))
+        .is_err());
+    assert_eq!(bounded.text.capacity(), 0);
+    assert!(bounded.text.is_empty());
+    #[derive(Serialize)]
+    struct Fields<'a> {
+        first: u32,
+        text: &'a Generated,
+    }
+    let swallowed = Generated {
+        text: "a",
+        count: MAX_STRING_UNITS + 1,
+        writes: Cell::new(0),
+        swallow: true,
+    };
+    assert!(to_vec(&swallowed).is_err());
+    let mut e = Encoder::new();
+    e.object(|e| {
+        e.u32(5);
+        assert!(to_fields(
+            e,
+            &Fields {
+                first: 1,
+                text: &swallowed
+            }
+        )
+        .is_err());
+        to_fields(e, &Pair(2, "after".into()))
+    })
+    .unwrap();
+    let mut old = Encoder::new();
+    old.object(|e| {
+        e.u32(5);
+        e.u32(2);
+        e.string("after")
+    })
+    .unwrap();
+    assert_eq!(e.finish(), old.finish());
 }
 
 fn unsupported<T: Serialize + for<'de> Deserialize<'de>>(value: &T) {

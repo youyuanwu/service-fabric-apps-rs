@@ -547,6 +547,8 @@ Scalar roots are native scalar fragments; struct roots include object framing.
 and bytes, not borrowed UTF-8 views of native UTF-16. Existing limits above
 apply; 4 MiB is a **per-object** extent limit, not an aggregate limit on a
 standalone root object array. Transport frames retain their separate limit.
+`collect_str` formats through a bounded sink that checks UTF-16 units before
+buffering each chunk, then uses the same native string encoder.
 
 Generic Vec/array/tuple/map, Option, enums, unit, floats, chars and other integer
 widths are unsupported unless used through an explicit native adapter.

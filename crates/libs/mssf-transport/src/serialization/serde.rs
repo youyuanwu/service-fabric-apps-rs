@@ -23,7 +23,7 @@
 //! assert_eq!(from_slice::<Payload>(&to_vec(&value).unwrap()).unwrap(), value);
 //! ```
 
-use super::{Decoder, Encoder, MAX_OBJECT_SIZE};
+use super::{Decoder, Encoder, MAX_OBJECT_SIZE, MAX_STRING_UNITS};
 use crate::{Error, Result};
 use ::serde::{
     de::{DeserializeSeed, SeqAccess, Visitor},
@@ -221,6 +221,30 @@ struct Serializer<'a> {
     mode: Mode,
 }
 
+#[derive(Default)]
+struct BoundedText {
+    text: String,
+    units: usize,
+    failed: bool,
+}
+
+impl fmt::Write for BoundedText {
+    fn write_str(&mut self, value: &str) -> fmt::Result {
+        if self.failed || value.len() > MAX_STRING_UNITS * 3 - self.text.len() {
+            self.failed = true;
+            return Err(fmt::Error);
+        }
+        let units = value.encode_utf16().count();
+        if units > MAX_STRING_UNITS - self.units {
+            self.failed = true;
+            return Err(fmt::Error);
+        }
+        self.units += units;
+        self.text.push_str(value);
+        Ok(())
+    }
+}
+
 macro_rules! serialize_scalar {
     ($name:ident, $ty:ty, $method:ident) => {
         fn $name(self, value: $ty) -> Result<()> {
@@ -266,6 +290,18 @@ impl<'a> ::serde::Serializer for Serializer<'a> {
             return Err(encode_error());
         }
         self.encoder.string(value)
+    }
+    fn collect_str<T: fmt::Display + ?Sized>(self, value: &T) -> Result<()> {
+        if self.mode != Mode::Value {
+            return Err(encode_error());
+        }
+        let mut text = BoundedText::default();
+        if fmt::write(&mut text, format_args!("{value}")).is_err() || text.failed {
+            return Err(Error::InvalidInput(
+                "native string formatting failed or exceeded limit",
+            ));
+        }
+        self.encoder.string(&text.text)
     }
     fn serialize_bytes(self, value: &[u8]) -> Result<()> {
         match self.mode {
