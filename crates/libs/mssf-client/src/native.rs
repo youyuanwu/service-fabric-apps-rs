@@ -166,7 +166,18 @@ pub(crate) mod tagged_pointer_slots {
 }
 
 macro_rules! strict_enum {
-    ($name:ident { $($variant:ident = $code:literal),* $(,)? }) => {
+    (
+        $(#[$meta:meta])*
+        $visibility:vis enum $name:ident {
+            $($(#[$variant_meta:meta])* $variant:ident = $code:literal),* $(,)?
+        }
+    ) => {
+        // Native codes are Serde values, not Rust discriminants.
+        $(#[$meta])*
+        $visibility enum $name {
+            $($(#[$variant_meta])* $variant,)*
+        }
+
         impl serde::Serialize for $name {
             fn serialize<S: serde::Serializer>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error> {
                 serializer.serialize_i64(match self { $(Self::$variant => $code,)* })

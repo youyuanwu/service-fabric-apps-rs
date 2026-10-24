@@ -36,19 +36,18 @@ impl DeployedApplicationQueryParameters {
 /// One native node-scoped page request, with independent paging controls.
 pub type DeployedApplicationQueryDescription = PagedQuery<DeployedApplicationQueryParameters>;
 
-/// Native deployment lifecycle status, distinct from application status/health.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum DeploymentStatus {
-    Invalid,
-    Downloading,
-    Activating,
-    Active,
-    Upgrading,
-    Deactivating,
+crate::native::strict_enum! {
+    /// Native deployment lifecycle status, distinct from application status/health.
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    pub enum DeploymentStatus {
+        Invalid = 0,
+        Downloading = 1,
+        Activating = 2,
+        Active = 3,
+        Upgrading = 4,
+        Deactivating = 5,
+    }
 }
-crate::native::strict_enum!(DeploymentStatus {
-    Invalid = 0, Downloading = 1, Activating = 2, Active = 3, Upgrading = 4, Deactivating = 5,
-});
 
 /// An owned native deployed-application observation.
 ///

@@ -37,16 +37,15 @@ pub type PartitionQueryDescription = PagedQuery<PartitionQueryParameters>;
 /// An explicit best-effort page, not a partition-map snapshot.
 pub type PartitionListPage = QueryPage<Partition>;
 
-/// Structural partition key kind. Invalid and unknown kinds are unsupported.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum PartitionKind {
-    Singleton,
-    Int64Range,
-    Named,
+crate::native::strict_enum! {
+    /// Structural partition key kind. Invalid and unknown kinds are unsupported.
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    pub enum PartitionKind {
+        Singleton = 1,
+        Int64Range = 2,
+        Named = 3,
+    }
 }
-crate::native::strict_enum!(PartitionKind {
-    Singleton = 1, Int64Range = 2, Named = 3,
-});
 
 /// Native partition metadata, retaining all five positional fields.
 ///
@@ -63,20 +62,18 @@ pub struct PartitionInformation {
     pub high_key: i64,
 }
 
-/// Native partition lifecycle state, independent of aggregated health.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum PartitionStatus {
-    Invalid,
-    Ready,
-    NotReady,
-    InQuorumLoss,
-    Reconfiguring,
-    Deleting,
+crate::native::strict_enum! {
+    /// Native partition lifecycle state, independent of aggregated health.
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    pub enum PartitionStatus {
+        Invalid = 0,
+        Ready = 1,
+        NotReady = 2,
+        InQuorumLoss = 3,
+        Reconfiguring = 4,
+        Deleting = 5,
+    }
 }
-crate::native::strict_enum!(PartitionStatus {
-    Invalid = 0, Ready = 1, NotReady = 2, InQuorumLoss = 3, Reconfiguring = 4,
-    Deleting = 5,
-});
 
 /// Raw Reliability::Epoch, not the masked public PrimaryEpoch projection.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize)]

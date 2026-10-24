@@ -871,7 +871,11 @@ to enter its derived scope. Encoding uses the same mapping in reverse.
 It remains available for derived unit enums; unknown codes are errors.
 Application status, definition kind, service kind and service status implement
 their explicit signed-i64 mappings directly and reject unknown codes without
-parallel wire enums. Node scalar enums (`NodeStatus`,
+parallel wire enums. All nine strict scalar enums, including partition,
+replica and deployment kinds/statuses, declare their variants and native codes
+once through `strict_enum!`, which generates the enum and its Serde mappings.
+Documentation, derives, default variants and Rust variant order are preserved;
+native codes are not Rust discriminants. Node scalar enums (`NodeStatus`,
 `HealthState`, deactivation/task enums and `SafetyCheckKind`) implement Serde
 through the shared numeric-enum macro: both native and JSON formats use their
 signed i64 codes, including `Unrecognized(i64)`. This preserves the deliberate

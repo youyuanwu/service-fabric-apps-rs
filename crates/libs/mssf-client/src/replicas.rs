@@ -63,32 +63,30 @@ pub type ReplicaQueryDescription = PagedQuery<ReplicaQueryParameters>;
 /// An explicit best-effort page, not a replica configuration snapshot.
 pub type ReplicaListPage = QueryPage<Replica>;
 
-/// Native replica lifecycle state, distinct from the status-filter bitmask.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ReplicaStatus {
-    Invalid,
-    InBuild,
-    Standby,
-    Ready,
-    Down,
-    Dropped,
+crate::native::strict_enum! {
+    /// Native replica lifecycle state, distinct from the status-filter bitmask.
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    pub enum ReplicaStatus {
+        Invalid = 0,
+        InBuild = 1,
+        Standby = 2,
+        Ready = 3,
+        Down = 4,
+        Dropped = 5,
+    }
 }
-crate::native::strict_enum!(ReplicaStatus {
-    Invalid = 0, InBuild = 1, Standby = 2, Ready = 3, Down = 4, Dropped = 5,
-});
 
-/// Native stateful replica role. Stateless records carry Unknown (zero).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ReplicaRole {
-    Unknown,
-    None,
-    Primary,
-    IdleSecondary,
-    ActiveSecondary,
+crate::native::strict_enum! {
+    /// Native stateful replica role. Stateless records carry Unknown (zero).
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    pub enum ReplicaRole {
+        Unknown = 0,
+        None = 1,
+        Primary = 2,
+        IdleSecondary = 3,
+        ActiveSecondary = 4,
+    }
 }
-crate::native::strict_enum!(ReplicaRole {
-    Unknown = 0, None = 1, Primary = 2, IdleSecondary = 3, ActiveSecondary = 4,
-});
 
 /// Complete native positional result. Stateful records use `replica_id` and
 /// `role`; stateless records use `instance_id`. The inactive ID is retained.

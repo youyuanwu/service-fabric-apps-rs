@@ -378,7 +378,8 @@ executor receives parameters and optional paging separately, without trait
 accessors for either.
 Configuration JSON now follows those declared native names and masks; legacy
 shapes and malformed/conflicting selectors fail explicitly.
-Strict scalar status/definition enums map their numeric codes directly; shared
+Strict scalar status/definition enums generate their type and numeric Serde
+mappings from one declaration rather than repeating the variant list; shared
 `HealthState` retains unknown codes, with list-specific rejection after decoding.
 URI redundancy is checked by semantic construction above the generic backend;
 node-ID agreement, duplicate parameters and cross-field checks remain record-level
