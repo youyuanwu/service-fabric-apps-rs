@@ -3,6 +3,34 @@
 use mssf_transport::serialization::serde::{NativeEnum, ObjectArray, Pointer};
 use serde::{Deserialize, Serialize};
 
+pub(crate) mod untagged {
+    use super::*;
+    use mssf_transport::serialization::serde::Untagged;
+
+    pub fn deserialize<'de, T: Deserialize<'de>, D: serde::Deserializer<'de>>(
+        deserializer: D,
+    ) -> Result<T, D::Error> {
+        if deserializer.is_human_readable() {
+            return T::deserialize(deserializer);
+        }
+        Untagged::<T>::deserialize(deserializer).map(|Untagged(value)| value)
+    }
+}
+
+pub(crate) mod guid {
+    use super::*;
+    use mssf_transport::serialization::serde::Guid;
+
+    pub fn deserialize<'de, D: serde::Deserializer<'de>>(
+        deserializer: D,
+    ) -> Result<uuid::Uuid, D::Error> {
+        if deserializer.is_human_readable() {
+            return uuid::Uuid::deserialize(deserializer);
+        }
+        Guid::deserialize(deserializer).map(|guid| uuid::Uuid::from_bytes_le(guid.0))
+    }
+}
+
 pub(crate) mod object_array {
     use super::*;
 
@@ -27,10 +55,30 @@ pub(crate) mod trailing_default {
     pub fn deserialize<'de, T: Deserialize<'de> + Default, D: serde::Deserializer<'de>>(
         deserializer: D,
     ) -> Result<T, D::Error> {
+        deserialize_or_else(deserializer, T::default)
+    }
+
+    pub(super) fn deserialize_or_else<'de, T: Deserialize<'de>, D: serde::Deserializer<'de>>(
+        deserializer: D,
+        default: fn() -> T,
+    ) -> Result<T, D::Error> {
         if deserializer.is_human_readable() {
             return T::deserialize(deserializer);
         }
-        Trailing::<T>::deserialize(deserializer).map(|Trailing(value)| value.unwrap_or_default())
+        Trailing::<T>::deserialize(deserializer)
+            .map(|Trailing(value)| value.unwrap_or_else(default))
+    }
+}
+
+pub(crate) mod trailing_health_state {
+    pub fn default() -> crate::HealthState {
+        crate::HealthState::Unknown
+    }
+
+    pub fn deserialize<'de, D: serde::Deserializer<'de>>(
+        deserializer: D,
+    ) -> Result<crate::HealthState, D::Error> {
+        super::trailing_default::deserialize_or_else(deserializer, default)
     }
 }
 
@@ -67,7 +115,7 @@ pub(crate) mod string_map {
 
 pub(crate) mod derived_guid {
     use super::*;
-    use mssf_transport::serialization::serde::{Derived, Guid};
+    use mssf_transport::serialization::serde::Derived;
 
     pub fn deserialize<'de, D: serde::Deserializer<'de>>(
         deserializer: D,
@@ -77,10 +125,11 @@ pub(crate) mod derived_guid {
         }
         #[derive(Deserialize)]
         struct Fields {
-            id: Guid,
+            #[serde(deserialize_with = "super::guid::deserialize")]
+            id: uuid::Uuid,
         }
         let Derived(fields) = Derived::<Fields>::deserialize(deserializer)?;
-        Ok(uuid::Uuid::from_bytes_le(fields.id.0))
+        Ok(fields.id)
     }
 }
 

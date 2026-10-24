@@ -939,6 +939,13 @@ collapsing partition variants into `Partition { kind, partition_id }`.
 The six partition variants share `PartitionSafetyCheck { partition_id }`; a
 field adapter enters the native derived scope and decodes GUID bytes into a UUID.
 `SafetyCheck::kind()` returns the discriminant implied by the variant.
+`PartitionInformation` uses an ordinary Deserialize derive; its containing
+partition field selects a shared untagged-object adapter, and its UUID field
+selects the shared native GUID adapter. JSON retains the ordinary object and
+UUID-string shapes. Deployed application health uses a shared trailing-health
+adapter with an explicit Unknown default. Neither record needs a handwritten
+deserializer or remote derive; malformed tags, GUID metadata and present
+suffixes still fail through the real query path.
 `NodeDeactivationTask` preserves the nested native identity as
 `id: NodeDeactivationTaskId { id, task_type }`, followed by `intent`.
 Callers access the task string through `task.id.id` and its subsystem through

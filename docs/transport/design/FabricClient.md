@@ -392,6 +392,9 @@ same pattern: parameter-owned query declarations, source-ordered native records
 and shared list envelopes. Partition-key and replica-kind differences belong to
 their domain models, not additional transport workflows. Query pages remain
 explicit and do not provide service endpoint resolution or a cluster snapshot.
+Ordinary model derives select shared field adapters for untagged nested objects,
+UUID mapping and explicit trailing health defaults, rather than model-specific
+deserializers or remote derives.
 A shared `decode_reply<Q>` function dispatches to the profile and validator
 outside the `Query` trait, symmetric with the shared request encoder.
 The shared schemas use `EmptyObjectArray` for the forbidden item-result list

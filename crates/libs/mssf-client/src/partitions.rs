@@ -55,41 +55,16 @@ crate::native::strict_enum!(PartitionKind {
 /// Native partition metadata, retaining all five positional fields.
 ///
 /// Only Named uses `name`; only Int64Range uses the inclusive signed key bounds.
+/// Native tag validation is selected by the containing field's adapter; standalone
+/// native consumers can use `mssf_transport::serialization::serde::Untagged<Self>`.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
-#[serde(remote = "Self")]
 pub struct PartitionInformation {
     pub kind: PartitionKind,
-    #[serde(deserialize_with = "deserialize_guid")]
+    #[serde(deserialize_with = "crate::native::guid::deserialize")]
     pub id: Uuid,
     pub name: String,
     pub low_key: i64,
     pub high_key: i64,
-}
-
-impl<'de> Deserialize<'de> for PartitionInformation {
-    fn deserialize<D: serde::Deserializer<'de>>(
-        deserializer: D,
-    ) -> std::result::Result<Self, D::Error> {
-        #[derive(Deserialize)]
-        #[serde(transparent)]
-        struct Fields(#[serde(with = "PartitionInformation")] PartitionInformation);
-        if deserializer.is_human_readable() {
-            Fields::deserialize(deserializer).map(|Fields(value)| value)
-        } else {
-            mssf_transport::serialization::serde::Untagged::<Fields>::deserialize(deserializer)
-                .map(|value| value.0 .0)
-        }
-    }
-}
-
-fn deserialize_guid<'de, D: serde::Deserializer<'de>>(
-    deserializer: D,
-) -> std::result::Result<Uuid, D::Error> {
-    if deserializer.is_human_readable() {
-        return Uuid::deserialize(deserializer);
-    }
-    mssf_transport::serialization::serde::Guid::deserialize(deserializer)
-        .map(|guid| Uuid::from_bytes_le(guid.0))
 }
 
 /// Native partition lifecycle state, independent of aggregated health.
@@ -120,6 +95,7 @@ pub struct ConfigurationEpoch {
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 pub struct Partition {
     pub kind: ServiceKind,
+    #[serde(deserialize_with = "crate::native::untagged::deserialize")]
     pub partition_information: PartitionInformation,
     pub instance_count: i32,
     pub target_replica_set_size: u32,
@@ -463,26 +439,39 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn partition_information_requires_untagged_objects_and_native_guid_metadata() {
+    fn partition_information_field_requires_untagged_objects_and_native_guid_metadata() {
         for malformed in 0..3 {
-            let mut e = Encoder::new();
-            e.typed_object(if malformed == 0 { &[1] } else { &[] }, |e| {
-                e.i64(1);
-                if malformed == 1 {
-                    e.byte_array(&GUID_BYTES)?;
-                } else if malformed == 2 {
-                    e.string(ID)?;
-                } else {
-                    e.guid(&GUID_BYTES);
-                }
-                e.string("")?;
-                e.i64(0);
-                e.i64(0);
-                Ok(())
-            })
-            .unwrap();
+            let message = reply(
+                Some(5),
+                Some(|e: &mut Encoder| {
+                    e.i64(1);
+                    e.typed_object(if malformed == 0 { &[1] } else { &[] }, |e| {
+                        e.i64(1);
+                        if malformed == 1 {
+                            e.byte_array(&GUID_BYTES)?;
+                        } else if malformed == 2 {
+                            e.string(ID)?;
+                        } else {
+                            e.guid(&GUID_BYTES);
+                        }
+                        e.string("")?;
+                        e.i64(0);
+                        e.i64(0);
+                        Ok(())
+                    })?;
+                    e.i32(1);
+                    e.u32(0);
+                    e.u32(0);
+                    e.i64(1);
+                    e.i64(1);
+                    Ok(())
+                }),
+                0,
+                None,
+                false,
+            );
             assert!(matches!(
-                from_slice::<PartitionInformation>(&e.finish()),
+                decode_reply::<PartitionQueryParameters>(&message),
                 Err(Error::Protocol(_))
             ));
         }

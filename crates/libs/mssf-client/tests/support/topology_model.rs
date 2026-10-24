@@ -148,6 +148,54 @@ async fn malformed_new_query_successes_retire_the_shared_connection() {
 }
 
 #[tokio::test]
+async fn partition_field_adapters_reject_bad_tags_and_guid_metadata_before_native_errors() {
+    for malformed in 0..3 {
+        for error in [0, REMOTE_CODE] {
+            let (client, server) = single_reply(move |request| {
+                let bytes = body(|e| {
+                    e.i64(2);
+                    e.pointer(Some(&5i32.to_le_bytes()), |e| {
+                        e.object_array(&[()], |e, _| {
+                            e.i64(1);
+                            e.typed_object(if malformed == 0 { &[1] } else { &[] }, |e| {
+                                e.i64(1);
+                                match malformed {
+                                    1 => e.byte_array(&[0; 16])?,
+                                    2 => e.string("00112233-4455-6677-8899-aabbccddeeff")?,
+                                    _ => e.guid(&[0; 16]),
+                                }
+                                e.string("")?;
+                                e.i64(0);
+                                e.i64(0);
+                                Ok(())
+                            })?;
+                            e.i32(1);
+                            e.u32(0);
+                            e.u32(0);
+                            e.i64(1);
+                            e.i64(1);
+                            Ok(())
+                        })?;
+                        e.pointer(None, |_| Ok(()))
+                    })?;
+                    e.i64(error);
+                    e.pointer(None, |_| Ok(()))
+                });
+                reply(request, "QueryReply", bytes)
+            })
+            .await;
+            assert!(matches!(
+                QueryKind::Partitions.call(&client, None).await,
+                Err(Error::Protocol(_))
+            ));
+            assert!(client.is_closed());
+            assert!(client.ping().await.is_err());
+            server.await.unwrap();
+        }
+    }
+}
+
+#[tokio::test]
 async fn invalid_new_query_options_send_nothing_and_preserve_connection() {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let endpoint = listener.local_addr().unwrap();

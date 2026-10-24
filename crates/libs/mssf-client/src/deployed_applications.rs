@@ -1,6 +1,5 @@
 //! Owned node-scoped deployed applications from the native paged query.
 
-use mssf_transport::serialization::serde::Trailing;
 use serde::{Deserialize, Serialize};
 
 use crate::{
@@ -77,8 +76,8 @@ pub struct DeployedApplication {
     )]
     pub temp_directory: String,
     #[serde(
-        default = "unknown_health_state",
-        deserialize_with = "deserialize_trailing_health"
+        default = "crate::native::trailing_health_state::default",
+        deserialize_with = "crate::native::trailing_health_state::deserialize"
     )]
     pub health_state: HealthState,
 }
@@ -86,20 +85,6 @@ pub struct DeployedApplication {
 /// One native page, not an atomic deployment snapshot. Byte limits can produce
 /// a continuation even when no count limit was requested.
 pub type DeployedApplicationListPage = QueryPage<DeployedApplication>;
-
-fn unknown_health_state() -> HealthState {
-    HealthState::Unknown
-}
-
-fn deserialize_trailing_health<'de, D: serde::Deserializer<'de>>(
-    deserializer: D,
-) -> std::result::Result<HealthState, D::Error> {
-    if deserializer.is_human_readable() {
-        return HealthState::deserialize(deserializer);
-    }
-    Trailing::<HealthState>::deserialize(deserializer)
-        .map(|Trailing(value)| value.unwrap_or(HealthState::Unknown))
-}
 
 impl Query for DeployedApplicationQueryParameters {
     type Output = DeployedApplicationListPage;
@@ -528,5 +513,14 @@ mod tests {
         assert!(application.work_directory.is_empty());
         assert!(application.log_directory.is_empty());
         assert!(application.temp_directory.is_empty());
+        for health in [
+            serde_json::Value::Null,
+            serde_json::json!("Unknown"),
+            serde_json::json!(1.5),
+        ] {
+            let mut malformed = serde_json::to_value(&application).unwrap();
+            malformed["health_state"] = health;
+            assert!(serde_json::from_value::<DeployedApplication>(malformed).is_err());
+        }
     }
 }
