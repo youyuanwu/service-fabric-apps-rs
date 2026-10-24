@@ -154,11 +154,17 @@ impl Progress {
         if page.generation < self.generation {
             return Ok(());
         }
-        // Reserve transient prospective-bookkeeping copies before cloning.
-        let _scratch = receiver.budget.reserve(
-            self.partitions.capacity() * (size_of::<(Uuid, i64)>() + 16)
-                + self.ranges.capacity() * size_of::<Interval>(),
-        )?;
+        // Cloning is not the only peak: a one-entry insertion can rehash the
+        // whole prospective map, and range merge/reallocation overlaps buffers.
+        // Retained protocol state is separately bounded; all transient copies
+        // must fit delivery accounting before constructing prospective state.
+        let copy_bytes = if page.generation == self.generation {
+            4 * (self.partitions.capacity() * (size_of::<(Uuid, i64)>() + 16)
+                + self.ranges.capacity() * size_of::<Interval>())
+        } else {
+            0
+        };
+        let _scratch = receiver.budget.reserve(copy_bytes)?;
         let mut next = if page.generation > self.generation {
             Self {
                 generation: page.generation,

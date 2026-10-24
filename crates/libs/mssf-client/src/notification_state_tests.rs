@@ -4,6 +4,36 @@ use mssf_transport::serialization::serde::{
     CountedStrings, CountedValues, Guid, ObjectArray, Pointer,
 };
 
+#[test]
+fn prospective_rehash_and_range_copy_peaks_are_reserved_before_clone() {
+    let receiver = Receiver::default();
+    let mut progress = Progress {
+        partitions: (1..=3500).map(|id| (Uuid::from_u128(id), 1)).collect(),
+        ranges: (0..4000)
+            .map(|i| Interval {
+                start: i * 3,
+                end: i * 3 + 1,
+            })
+            .collect(),
+        ..Default::default()
+    };
+    let required = 4
+        * (progress.partitions.capacity() * (size_of::<(Uuid, i64)>() + 16)
+            + progress.ranges.capacity() * size_of::<Interval>());
+    let memory = receiver.budget.reserve(4096).unwrap();
+    let _occupied = receiver
+        .budget
+        .reserve(MAX_MEMORY - receiver._queue_memory.bytes - 4096 - (required - 1))
+        .unwrap();
+    assert!(matches!(
+        progress.commit(page(0, &[(6000, 16000)], &[]), memory, &receiver),
+        Err(Error::NotificationLag)
+    ));
+    assert_eq!(progress.partitions.len(), 3500);
+    assert_eq!(progress.ranges.len(), 4000);
+    assert!(receiver.inner.lock().unwrap().queue.is_empty());
+}
+
 fn page(generation: i64, entries: &[(u128, i64)], ranges: &[(i64, i64)]) -> Page {
     Page {
         id: PageId {

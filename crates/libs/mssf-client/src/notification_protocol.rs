@@ -172,7 +172,9 @@ pub(crate) fn page_allocation_bound(body: &[u8]) -> Result<usize> {
                 return Err(crate::Error::Protocol("notification entry count limit"));
             }
             for _ in 0..entries {
-                bytes += 1024;
+                bytes += 4 * std::mem::size_of::<Entry>()
+                    + 6 * std::mem::size_of::<crate::ServiceNotification>()
+                    + 256;
                 d.pointer(|d, _| {
                     d.pointer(|d, _| {
                         d.object(|d| {
@@ -188,7 +190,10 @@ pub(crate) fn page_allocation_bound(body: &[u8]) -> Result<usize> {
                             if count > MAX_COLLECTION_COUNT {
                                 return Err(crate::Error::Protocol("endpoint count limit"));
                             }
-                            bytes += count * 128;
+                            bytes += count
+                                * (4 * std::mem::size_of::<String>()
+                                    + 4 * std::mem::size_of::<crate::ServiceEndpoint>()
+                                    + 64);
                             for _ in 0..count {
                                 bytes += d.string_allocation_bound()? * 2;
                             }

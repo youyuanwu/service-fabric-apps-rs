@@ -5,6 +5,59 @@ use mssf_transport::{
 };
 use tokio::net::TcpListener;
 
+#[tokio::test]
+async fn known_driver_failure_precedes_buffered_updates_without_worker_progress() {
+    use crate::resolution_protocol::{Cuid, ReplicaSet, TableEntry};
+    use mssf_transport::serialization::serde::{CountedStrings, CountedValues, Guid, Pointer};
+    let (session, _cleanups, _peer) = session().await;
+    let page = wire::Page {
+        id: wire::PageId {
+            activity: wire::Activity {
+                guid: Guid([1; 16]),
+                index: 1,
+            },
+            index: 0,
+        },
+        generation: Generation::default(),
+        versions: Pointer(None),
+        entries: CountedValues(vec![Pointer(Some(wire::Entry {
+            entry: Pointer(Some(TableEntry {
+                cuid: Cuid {
+                    id: Guid(Uuid::new_v4().to_bytes_le()),
+                },
+                name: "fabric:/App/Service".into(),
+                replicas: ReplicaSet {
+                    stateful: false,
+                    primary_valid: false,
+                    primary: String::new(),
+                    replicas: CountedStrings(vec![]),
+                    lookup: 1,
+                },
+                found: true,
+            })),
+            primary_only: false,
+        }))]),
+    };
+    let memory = session.receiver.budget.reserve(4096).unwrap();
+    Progress::default()
+        .commit(page, memory, &session.receiver)
+        .unwrap();
+    let mut client = ServiceNotificationClient {
+        session: session.clone(),
+        worker: None,
+        gateway: GatewayDescription {
+            address: String::new(),
+            node_id: 0,
+            node_instance: 0,
+            node_name: "test".into(),
+        },
+    };
+    session.connection.abort();
+    assert!(matches!(client.recv().await, Some(Err(Error::Closed))));
+    assert!(client.recv().await.is_none());
+    session.connection.close().await.unwrap();
+}
+
 async fn session() -> (Arc<Session>, mpsc::Receiver<Cleanup>, tokio::net::TcpStream) {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let address = listener.local_addr().unwrap();

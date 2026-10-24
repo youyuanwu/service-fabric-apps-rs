@@ -360,6 +360,11 @@ impl ServiceNotificationClient {
     /// Local receive: cancellation never consumes an event or unregisters filters.
     /// On failure returns one terminal error, then None, even if the queue was full.
     pub async fn recv(&mut self) -> Option<Result<ServiceNotification>> {
+        // A known transport failure takes priority over buffered updates even
+        // when the worker has not yet been scheduled to observe driver exit.
+        if let Some(error) = self.session.connection.terminal_error() {
+            self.session.fail(error);
+        }
         self.session.receiver.recv().await
     }
 
@@ -543,7 +548,11 @@ async fn run(
             }
             incoming = pages.recv() => {
                 let Some(incoming)=incoming else { session.fail(Error::Closed); break; };
-                let result=wire::decode_page(&incoming.body).and_then(|page|progress.commit(page,incoming.memory,&session.receiver));
+                let decoded = wire::decode_page(&incoming.body);
+                // Release input before commit releases the page reservation;
+                // an ACK wait must not retain unaccounted raw page storage.
+                drop(incoming.body);
+                let result=decoded.and_then(|page|progress.commit(page,incoming.memory,&session.receiver));
                 let ack=match (wire::status(result.is_ok()),deadline_after(session.timeout)) {
                     (Ok(body),Ok(deadline))=>incoming.context.reply(body,deadline).await,
                     (Err(error),_)|(_,Err(error))=>Err(error),
