@@ -1,0 +1,174 @@
+use super::*;
+use crate::{notification_protocol::*, resolution_protocol::*, NodeId};
+use mssf_transport::serialization::serde::{
+    CountedStrings, CountedValues, Guid, ObjectArray, Pointer,
+};
+
+fn page(generation: i64, entries: &[(u128, i64)], ranges: &[(i64, i64)]) -> Page {
+    Page {
+        id: PageId {
+            activity: Activity {
+                guid: Guid([1; 16]),
+                index: 1,
+            },
+            index: 0,
+        },
+        generation: Generation {
+            value: generation,
+            owner: NodeId { high: 0, low: 0 },
+        },
+        versions: Pointer(Some(Versions {
+            ranges: ObjectArray(
+                ranges
+                    .iter()
+                    .map(|(start, end)| Interval {
+                        start: *start,
+                        end: *end,
+                    })
+                    .collect(),
+            ),
+        })),
+        entries: CountedValues(
+            entries
+                .iter()
+                .map(|(id, lookup)| {
+                    Pointer(Some(Entry {
+                        entry: Pointer(Some(TableEntry {
+                            cuid: Cuid {
+                                id: Guid(Uuid::from_u128(*id).to_bytes_le()),
+                            },
+                            name: "fabric:/App/Service".into(),
+                            replicas: ReplicaSet {
+                                stateful: false,
+                                primary_valid: false,
+                                primary: String::new(),
+                                replicas: CountedStrings(vec![]),
+                                lookup: *lookup,
+                            },
+                            found: true,
+                        })),
+                        primary_only: false,
+                    }))
+                })
+                .collect(),
+        ),
+    }
+}
+fn commit(progress: &mut Progress, receiver: &Receiver, page: Page) -> Result<()> {
+    let memory = receiver.budget.reserve(1024 * 1024)?;
+    progress.commit(page, memory, receiver)
+}
+
+#[tokio::test]
+async fn retries_stale_versions_generations_and_empty_invalidations() {
+    let receiver = Receiver::default();
+    let mut progress = Progress::default();
+    commit(&mut progress, &receiver, page(1, &[(1, 5)], &[(5, 6)])).unwrap();
+    commit(&mut progress, &receiver, page(1, &[(1, 5)], &[(5, 6)])).unwrap();
+    commit(&mut progress, &receiver, page(1, &[(1, 4)], &[])).unwrap();
+    commit(&mut progress, &receiver, page(0, &[(2, 99)], &[])).unwrap();
+    assert_eq!(receiver.inner.lock().unwrap().queue.len(), 1);
+    assert!(receiver.recv().await.unwrap().unwrap().endpoints.is_empty());
+    commit(&mut progress, &receiver, page(2, &[(1, 1)], &[(1, 2)])).unwrap();
+    assert_eq!(receiver.recv().await.unwrap().unwrap().version.lookup, 1);
+    assert_eq!(progress.partitions.len(), 1);
+}
+
+#[tokio::test]
+async fn whole_page_overflow_rolls_back_and_terminal_bypasses_full_delivery() {
+    let receiver = Receiver::default();
+    let mut progress = Progress::default();
+    let entries: Vec<_> = (1..=256).map(|i| (i, i as i64)).collect();
+    commit(&mut progress, &receiver, page(1, &entries, &[])).unwrap();
+    assert_eq!(receiver.inner.lock().unwrap().queue.len(), MAX_EVENTS);
+    assert!(matches!(
+        commit(
+            &mut progress,
+            &receiver,
+            page(1, &[(999, 999), (1000, 1000)], &[(999, 1001)])
+        ),
+        Err(Error::NotificationLag)
+    ));
+    assert_eq!(progress.partitions.len(), 256);
+    assert!(progress.ranges.is_empty());
+    receiver.fail(Error::NotificationLag);
+    assert!(matches!(
+        receiver.recv().await,
+        Some(Err(Error::NotificationLag))
+    ));
+    assert!(receiver.recv().await.is_none());
+    assert_eq!(
+        *receiver.budget.0.lock().unwrap(),
+        receiver._queue_memory.bytes
+    );
+}
+
+#[test]
+fn bookkeeping_limits_do_not_evict_or_advance_on_failure() {
+    let receiver = Receiver::default();
+    let mut progress = Progress {
+        partitions: (1..=4096).map(|id| (Uuid::from_u128(id), 1)).collect(),
+        ..Default::default()
+    };
+    assert!(matches!(
+        commit(&mut progress, &receiver, page(0, &[(5000, 5)], &[])),
+        Err(Error::ResourceLimit(_))
+    ));
+    assert_eq!(progress.partitions.len(), MAX_IDENTITIES);
+    progress.partitions.clear();
+    progress.ranges = (0..4096)
+        .map(|i| Interval {
+            start: i * 3,
+            end: i * 3 + 1,
+        })
+        .collect();
+    assert!(matches!(
+        commit(&mut progress, &receiver, page(0, &[], &[(15000, 15001)])),
+        Err(Error::ResourceLimit(_))
+    ));
+    assert_eq!(progress.ranges.len(), MAX_INTERVALS);
+    assert!(receiver.inner.lock().unwrap().queue.is_empty());
+}
+
+#[test]
+fn memory_budget_is_shared_and_released_on_every_path() {
+    let budget = Arc::new(Budget::default());
+    let memory = budget.reserve(MAX_MEMORY).unwrap();
+    assert!(matches!(budget.reserve(1), Err(Error::NotificationLag)));
+    drop(memory);
+    assert_eq!(*budget.0.lock().unwrap(), 0);
+    let receiver = Receiver::default();
+    let mut progress = Progress::default();
+    let mut bad = page(0, &[(1, 1)], &[(2, 1)]);
+    assert!(commit(&mut progress, &receiver, bad).is_err());
+    assert_eq!(
+        *receiver.budget.0.lock().unwrap(),
+        receiver._queue_memory.bytes
+    );
+    bad = page(0, &[(1, 1)], &[]);
+    bad.entries.0[0].0 = None;
+    assert!(commit(&mut progress, &receiver, bad).is_err());
+    assert_eq!(
+        *receiver.budget.0.lock().unwrap(),
+        receiver._queue_memory.bytes
+    );
+}
+
+#[tokio::test]
+async fn cancelled_receive_does_not_consume_and_protocol_only_pages_advance() {
+    let receiver = Receiver::default();
+    let mut progress = Progress::default();
+    assert!(
+        tokio::time::timeout(std::time::Duration::from_millis(1), receiver.recv())
+            .await
+            .is_err()
+    );
+    commit(&mut progress, &receiver, page(1, &[], &[(1, 5), (5, 8)])).unwrap();
+    assert_eq!(progress.ranges.len(), 1);
+    assert_eq!(progress.ranges[0].end, 8);
+    assert!(receiver.inner.lock().unwrap().queue.is_empty());
+    commit(&mut progress, &receiver, page(1, &[(1, 8)], &[])).unwrap();
+    assert_eq!(receiver.recv().await.unwrap().unwrap().version.lookup, 8);
+    receiver.finish();
+    assert!(receiver.recv().await.is_none());
+}

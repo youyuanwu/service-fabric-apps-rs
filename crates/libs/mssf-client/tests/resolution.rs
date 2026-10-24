@@ -138,7 +138,7 @@ async fn keys_refresh_binding_and_versions() {
                     &mut s,
                     &peer::reply(
                         &req,
-                        "ResolveServiceReply",
+                        "ResolveServiceRequest",
                         result(partition_kind, low, high, named, 21, false),
                     ),
                 )
@@ -216,7 +216,7 @@ async fn groups_and_malformed_replies_fail_explicitly() {
         let task = tokio::spawn(async move {
             let mut s = peer::accept(listener).await;
             let req = read_message(&mut s).await.unwrap();
-            write_message(&mut s, &peer::reply(&req, "ResolveServiceReply", body))
+            write_message(&mut s, &peer::reply(&req, "ResolveServiceRequest", body))
                 .await
                 .unwrap();
         });

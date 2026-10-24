@@ -180,7 +180,8 @@ pub(crate) struct ResolveReply {
 }
 
 pub(crate) fn decode(message: Message) -> Result<ResolvedServicePartition> {
-    crate::protocol::check_reply(&message, &["ResolveServiceReply"])?;
+    // NamingMessage::GetResolveServiceReply actually uses ResolveServiceAction.
+    crate::protocol::check_reply(&message, &["ResolveServiceRequest"])?;
     let reply: ResolveReply = from_slice(&message.body)?;
     if reply.group {
         return Err(Error::InvalidInput(

@@ -1,7 +1,10 @@
 use std::{
     collections::HashMap,
     net::SocketAddr,
-    sync::{Arc, Mutex, Weak},
+    sync::{
+        atomic::{AtomicU8, Ordering},
+        Arc, Mutex, Weak,
+    },
     time::Duration,
 };
 
@@ -214,6 +217,24 @@ struct Outbound {
     id: MessageId,
     deadline: Instant,
     bytes: Vec<u8>,
+    sent: SendStatus,
+}
+
+/// Race-free queued/started observation for uncertain remote mutations.
+#[derive(Clone, Default)]
+pub struct SendStatus(Arc<AtomicU8>);
+impl SendStatus {
+    /// Prevent an unsent frame starting. Returns true if writing already began.
+    pub fn cancel_unsent(&self) -> bool {
+        self.0
+            .compare_exchange(0, 2, Ordering::AcqRel, Ordering::Acquire)
+            .is_err_and(|state| state == 1)
+    }
+    fn start(&self) -> bool {
+        self.0
+            .compare_exchange(0, 1, Ordering::AcqRel, Ordering::Acquire)
+            .is_ok()
+    }
 }
 
 struct RequestGuard {
@@ -399,6 +420,30 @@ impl Connection {
         deadline: Instant,
         decode: fn(Message) -> Result<T>,
     ) -> Result<T> {
+        self.request_decoded_tracked(
+            action,
+            actor,
+            extra_headers,
+            body,
+            deadline,
+            decode,
+            SendStatus::default(),
+        )
+        .await
+    }
+
+    /// Like request_decoded, with a cancellation-safe started-write marker.
+    #[allow(clippy::too_many_arguments)]
+    pub async fn request_decoded_tracked<T: Send + 'static>(
+        &self,
+        action: &str,
+        actor: i64,
+        extra_headers: Vec<Header>,
+        body: Vec<u8>,
+        deadline: Instant,
+        decode: fn(Message) -> Result<T>,
+        sent: SendStatus,
+    ) -> Result<T> {
         let shared = &self.handle.shared;
         if let Some(error) = shared.error() {
             return Err(error);
@@ -483,6 +528,7 @@ impl Connection {
             id,
             deadline,
             bytes,
+            sent,
         });
         shared.changed.notify_one();
         let (result, _permit) = timeout_at(deadline, receiver)
@@ -650,6 +696,9 @@ async fn send_loop<W: AsyncWrite + Unpin>(
         }
         if Instant::now() >= command.deadline {
             shared.complete(command.id, Err(Error::Timeout));
+            continue;
+        }
+        if !command.sent.start() {
             continue;
         }
         // Local request expiry must not truncate a started frame or retire
