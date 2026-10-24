@@ -424,6 +424,21 @@ impl<'a> Decoder<'a> {
         Ok(value)
     }
 
+    /// Validate/consume a string without allocating, returning an upper bound
+    /// on the UTF-8 String capacity used by `string` (including growth).
+    pub fn string_allocation_bound(&mut self) -> Result<usize> {
+        let bytes = self.string_bytes()?;
+        for character in Self::characters(bytes) {
+            character.map_err(|_| Error::Protocol("invalid UTF-16 string"))?;
+        }
+        Ok(bytes.len() * 2)
+    }
+
+    /// Validate/consume native byte-array metadata without allocating.
+    pub fn byte_array_length(&mut self) -> Result<usize> {
+        Ok(self.byte_array_bytes()?.len())
+    }
+
     pub fn byte_array(&mut self) -> Result<Vec<u8>> {
         Ok(self.byte_array_bytes()?.to_vec())
     }

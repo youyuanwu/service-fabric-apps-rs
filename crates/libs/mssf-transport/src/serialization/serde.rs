@@ -67,8 +67,8 @@ use std::fmt;
 
 mod adapters;
 pub use adapters::{
-    guid, CountedStrings, Derived, EmptyObjectArray, FixedTag, Inline, NativeEnum, NativeType,
-    NumericEnum, Pointer, RawTagged, Trailing, Typed, Untagged,
+    guid, CountedStrings, CountedValues, Derived, EmptyObjectArray, FixedTag, Inline, NativeEnum,
+    NativeType, NumericEnum, Pointer, RawTagged, Trailing, Typed, Untagged,
 };
 
 const GUID_ADAPTER: &str = "$fabric::Guid";
@@ -79,6 +79,7 @@ const INLINE_ADAPTER: &str = "$fabric::Inline";
 const DERIVED_ADAPTER: &str = "$fabric::Derived";
 const TRAILING_ADAPTER: &str = "$fabric::Trailing";
 const STRINGS_ADAPTER: &str = "$fabric::CountedStrings";
+const VALUES_ADAPTER: &str = "$fabric::CountedValues";
 const ENUM_ADAPTER: &str = "$fabric::NativeEnum";
 const NUMERIC_ENUM_ADAPTER: &str = "$fabric::NumericEnum";
 
@@ -273,6 +274,7 @@ enum Mode {
     Contents,
     Trailing,
     Strings,
+    Values,
     StringElement,
     Enum,
     EnumPointer,
@@ -455,11 +457,12 @@ impl<'a> ::serde::Serializer for Serializer<'a> {
                 Mode::Fields
             }
             (Mode::Value, STRINGS_ADAPTER) => Mode::Strings,
+            (Mode::Value, VALUES_ADAPTER) => Mode::Values,
             (
                 _,
                 GUID_ADAPTER | ARRAY_ADAPTER | POINTER_ADAPTER | TYPED_ADAPTER | TRAILING_ADAPTER
                 | INLINE_ADAPTER | DERIVED_ADAPTER | STRINGS_ADAPTER | ENUM_ADAPTER
-                | NUMERIC_ENUM_ADAPTER,
+                | NUMERIC_ENUM_ADAPTER | VALUES_ADAPTER,
             ) => return Err(encode_error()),
             _ => self.mode,
         };
@@ -483,7 +486,7 @@ impl<'a> ::serde::Serializer for Serializer<'a> {
         compound.finish()
     }
     fn serialize_seq(self, len: Option<usize>) -> Result<Self::SerializeSeq> {
-        if !matches!(self.mode, Mode::Array | Mode::Strings) {
+        if !matches!(self.mode, Mode::Array | Mode::Strings | Mode::Values) {
             return Err(encode_error());
         }
         let len = len.ok_or_else(encode_error)?;
@@ -497,7 +500,11 @@ impl<'a> ::serde::Serializer for Serializer<'a> {
                 return Err(Error::InvalidInput("counted-string limit exceeded"));
             }
             self.encoder.u32(len as u32);
-            Framing::Strings
+            if self.mode == Mode::Strings {
+                Framing::Strings
+            } else {
+                Framing::Values
+            }
         };
         Ok(Compound {
             encoder: self.encoder,
@@ -632,6 +639,7 @@ enum Framing {
     Fields,
     Array,
     Strings,
+    Values,
 }
 struct Compound<'a> {
     encoder: &'a mut Encoder,
@@ -658,7 +666,10 @@ impl Compound<'_> {
             encoder: self.encoder,
             mode,
         })?;
-        if (!matches!(self.framing, Framing::Array | Framing::Strings) || self.depth > 0)
+        if (!matches!(
+            self.framing,
+            Framing::Array | Framing::Strings | Framing::Values
+        ) || self.depth > 0)
             && self.encoder.bytes.len() - self.start > MAX_OBJECT_SIZE
         {
             return Err(Error::InvalidInput("object size limit exceeded"));
@@ -882,10 +893,11 @@ impl<'de> ::serde::Deserializer<'de> for Deserializer<'_, 'de> {
                 Mode::Fields
             }
             (Mode::Value, STRINGS_ADAPTER) => Mode::Strings,
+            (Mode::Value, VALUES_ADAPTER) => Mode::Values,
             (
                 _,
                 GUID_ADAPTER | ARRAY_ADAPTER | POINTER_ADAPTER | TRAILING_ADAPTER | INLINE_ADAPTER
-                | DERIVED_ADAPTER | STRINGS_ADAPTER | NUMERIC_ENUM_ADAPTER,
+                | DERIVED_ADAPTER | STRINGS_ADAPTER | NUMERIC_ENUM_ADAPTER | VALUES_ADAPTER,
             ) => return Err(decode_error()),
             _ => self.mode,
         };
@@ -896,7 +908,7 @@ impl<'de> ::serde::Deserializer<'de> for Deserializer<'_, 'de> {
         })
     }
     fn deserialize_seq<V: Visitor<'de>>(self, visitor: V) -> Result<V::Value> {
-        if !matches!(self.mode, Mode::Array | Mode::Strings) {
+        if !matches!(self.mode, Mode::Array | Mode::Strings | Mode::Values) {
             return Err(decode_error());
         }
         let count = if self.mode == Mode::Array {
@@ -913,8 +925,10 @@ impl<'de> ::serde::Deserializer<'de> for Deserializer<'_, 'de> {
             remaining: count,
             mode: if self.mode == Mode::Array {
                 Mode::Object
-            } else {
+            } else if self.mode == Mode::Strings {
                 Mode::StringElement
+            } else {
+                Mode::Value
             },
         };
         let value = visitor.visit_seq(&mut access)?;
