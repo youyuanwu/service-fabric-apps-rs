@@ -50,6 +50,21 @@ fn scalar_node_enums_use_signed_numeric_serde_and_retain_unknown_values() {
 }
 
 #[test]
+fn health_state_default_is_unknown_without_defaulting_explicit_values() {
+    assert_eq!(HealthState::default(), HealthState::Unknown);
+    assert_eq!(HealthState::default().as_raw(), 65535);
+    assert_eq!(
+        serde_json::from_str::<HealthState>("0").unwrap(),
+        HealthState::Invalid
+    );
+    assert_eq!(
+        serde_json::from_str::<HealthState>("-99").unwrap(),
+        HealthState::Unrecognized(-99)
+    );
+    assert!(serde_json::from_str::<HealthState>("null").is_err());
+}
+
+#[test]
 fn descriptions_and_parameters_support_json_without_becoming_native_wire_dtos() {
     let paging = Paging {
         continuation_token: Some(" opaque+/\0\u{1f980} ".into()),

@@ -76,8 +76,8 @@ pub struct DeployedApplication {
     )]
     pub temp_directory: String,
     #[serde(
-        default = "crate::native::trailing_health_state::default",
-        deserialize_with = "crate::native::trailing_health_state::deserialize"
+        default,
+        deserialize_with = "crate::native::trailing_default::deserialize"
     )]
     pub health_state: HealthState,
 }

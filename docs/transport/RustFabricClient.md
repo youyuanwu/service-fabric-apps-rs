@@ -942,8 +942,9 @@ field adapter enters the native derived scope and decodes GUID bytes into a UUID
 `PartitionInformation` uses an ordinary Deserialize derive; its containing
 partition field selects a shared untagged-object adapter, and its UUID field
 selects the shared native GUID adapter. JSON retains the ordinary object and
-UUID-string shapes. Deployed application health uses a shared trailing-health
-adapter with an explicit Unknown default. Neither record needs a handwritten
+UUID-string shapes. Deployed application health uses the generic trailing-default
+adapter; `HealthState` owns its Unknown default through `Default`. The codec has
+no health-specific adapter or default policy. Neither record needs a handwritten
 deserializer or remote derive; malformed tags, GUID metadata and present
 suffixes still fail through the real query path.
 `NodeDeactivationTask` preserves the nested native identity as

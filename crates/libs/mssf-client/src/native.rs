@@ -55,30 +55,10 @@ pub(crate) mod trailing_default {
     pub fn deserialize<'de, T: Deserialize<'de> + Default, D: serde::Deserializer<'de>>(
         deserializer: D,
     ) -> Result<T, D::Error> {
-        deserialize_or_else(deserializer, T::default)
-    }
-
-    pub(super) fn deserialize_or_else<'de, T: Deserialize<'de>, D: serde::Deserializer<'de>>(
-        deserializer: D,
-        default: fn() -> T,
-    ) -> Result<T, D::Error> {
         if deserializer.is_human_readable() {
             return T::deserialize(deserializer);
         }
-        Trailing::<T>::deserialize(deserializer)
-            .map(|Trailing(value)| value.unwrap_or_else(default))
-    }
-}
-
-pub(crate) mod trailing_health_state {
-    pub fn default() -> crate::HealthState {
-        crate::HealthState::Unknown
-    }
-
-    pub fn deserialize<'de, D: serde::Deserializer<'de>>(
-        deserializer: D,
-    ) -> Result<crate::HealthState, D::Error> {
-        super::trailing_default::deserialize_or_else(deserializer, default)
+        Trailing::<T>::deserialize(deserializer).map(|Trailing(value)| value.unwrap_or_default())
     }
 }
 
