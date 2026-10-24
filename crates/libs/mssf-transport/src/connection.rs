@@ -1,7 +1,7 @@
 use std::{
     collections::HashMap,
     net::SocketAddr,
-    sync::{Arc, Mutex},
+    sync::{Arc, Mutex, Weak},
     time::Duration,
 };
 
@@ -22,9 +22,15 @@ use crate::{
 pub const MAX_PENDING_REQUESTS: usize = 32;
 /// Maximum queued frames, including abandoned commands awaiting disposal.
 pub const MAX_QUEUED_REQUESTS: usize = 32;
+/// Reserved reverse-reply capacity, independent of ordinary requests.
+pub const MAX_QUEUED_CONTROLS: usize = 32;
 /// A started write or partial incoming frame must finish within this limit.
 pub const MAX_FRAME_TIME: Duration = Duration::from_secs(30);
 const MAX_UNMATCHED_REPLIES: usize = 1024;
+
+#[cfg(test)]
+#[path = "connection_duplex_tests.rs"]
+mod duplex_tests;
 
 pub fn deadline_after(timeout: Duration) -> Result<Instant> {
     let ticks = timeout.as_nanos() / 100;
@@ -100,6 +106,68 @@ struct Shared {
     stop: Notify,
     changed: Notify,
     stopped: watch::Sender<bool>,
+    reverse: Option<ReverseHandler>,
+    controls: mpsc::Sender<Control>,
+}
+
+/// Bounded, nonblocking handoff executed on the transport reader.
+/// Returning an error retires this connection. Only the supported native
+/// notification envelope is routed here, never ordinary correlated replies.
+pub type ReverseHandler = Arc<dyn Fn(ReverseRequest) -> Result<()> + Send + Sync>;
+
+pub struct ReverseRequest {
+    pub message: Message,
+    pub context: ReplyContext,
+}
+
+/// A consuming reply capability bound to the original connection and request.
+/// It does not keep a public connection owner alive.
+pub struct ReplyContext {
+    shared: Weak<Shared>,
+    id: MessageId,
+}
+
+struct Control {
+    bytes: Vec<u8>,
+    deadline: Instant,
+    complete: oneshot::Sender<Result<()>>,
+}
+
+impl ReplyContext {
+    /// Queue and flush a native notification processing-status reply.
+    pub async fn reply(self, body: Vec<u8>, deadline: Instant) -> Result<()> {
+        let shared = self.shared.upgrade().ok_or(Error::Closed)?;
+        if let Some(error) = shared.error() {
+            return Err(error);
+        }
+        remaining_ticks(deadline)?;
+        let message = Message {
+            headers: vec![
+                Header::actor(5)?,
+                Header::action("ServiceNotificationReply")?,
+                Header::relates_to(self.id)?,
+                Header::boolean(crate::message::HIGH_PRIORITY, true)?,
+            ],
+            body,
+        };
+        let bytes = message.to_frame()?.encode()?;
+        let (sender, receiver) = oneshot::channel();
+        shared
+            .controls
+            .try_send(Control {
+                bytes,
+                deadline,
+                complete: sender,
+            })
+            .map_err(|error| match error {
+                mpsc::error::TrySendError::Full(_) => Error::ResourceLimit("reply/control queue"),
+                mpsc::error::TrySendError::Closed(_) => Error::Closed,
+            })?;
+        timeout_at(deadline, receiver)
+            .await
+            .map_err(|_| Error::Timeout)?
+            .map_err(|_| shared.error().unwrap_or(Error::Closed))?
+    }
 }
 
 impl Shared {
@@ -180,6 +248,23 @@ pub struct Connection {
 
 impl Connection {
     pub async fn connect_clear(endpoint: SocketAddr, deadline: Instant) -> Result<Self> {
+        Self::connect_role(endpoint, deadline, None).await
+    }
+
+    /// Explicitly opt into native notification reverse requests on a dedicated socket.
+    pub async fn connect_duplex_clear(
+        endpoint: SocketAddr,
+        deadline: Instant,
+        handler: ReverseHandler,
+    ) -> Result<Self> {
+        Self::connect_role(endpoint, deadline, Some(handler)).await
+    }
+
+    async fn connect_role(
+        endpoint: SocketAddr,
+        deadline: Instant,
+        handler: Option<ReverseHandler>,
+    ) -> Result<Self> {
         remaining_ticks(deadline)?;
         let process_id = uuid::Uuid::new_v4().to_bytes_le();
         let id = MessageId {
@@ -210,13 +295,27 @@ impl Connection {
         })
         .await
         .map_err(|_| Error::Timeout)??;
-        Ok(Self::start(stream, remote, process_id))
+        Ok(Self::start_role(stream, remote, process_id, handler))
     }
 
+    #[cfg(test)]
     fn start<S>(stream: S, remote: ListenInstance, process_id: [u8; 16]) -> Self
     where
         S: AsyncRead + AsyncWrite + Unpin + Send + 'static,
     {
+        Self::start_role(stream, remote, process_id, None)
+    }
+
+    fn start_role<S>(
+        stream: S,
+        remote: ListenInstance,
+        process_id: [u8; 16],
+        reverse: Option<ReverseHandler>,
+    ) -> Self
+    where
+        S: AsyncRead + AsyncWrite + Unpin + Send + 'static,
+    {
+        let (controls, control_rx) = mpsc::channel(MAX_QUEUED_CONTROLS);
         let shared = Arc::new(Shared {
             inner: Mutex::new(Inner {
                 terminal: None,
@@ -230,9 +329,11 @@ impl Connection {
             stop: Notify::new(),
             changed: Notify::new(),
             stopped: watch::channel(false).0,
+            reverse,
+            controls,
         });
         let (commands, receiver) = mpsc::channel(MAX_QUEUED_REQUESTS);
-        tokio::spawn(drive(stream, shared.clone(), receiver));
+        tokio::spawn(drive(stream, shared.clone(), receiver, control_rx));
         Self {
             handle: Arc::new(Handle {
                 shared,
@@ -249,6 +350,13 @@ impl Connection {
     /// The first terminal cause, including failures observed while idle.
     pub fn terminal_error(&self) -> Option<Error> {
         self.handle.shared.error()
+    }
+
+    /// Wait for driver exit without initiating shutdown.
+    pub async fn closed(&self) -> Error {
+        let mut stopped = self.handle.shared.stopped.subscribe();
+        let _ = stopped.wait_for(|stopped| *stopped).await;
+        self.terminal_error().unwrap_or(Error::Closed)
     }
 
     /// Signal immediate shared shutdown without waiting for driver exit.
@@ -397,8 +505,12 @@ impl Connection {
     }
 }
 
-async fn drive<S>(stream: S, shared: Arc<Shared>, commands: mpsc::Receiver<Outbound>)
-where
+async fn drive<S>(
+    stream: S,
+    shared: Arc<Shared>,
+    commands: mpsc::Receiver<Outbound>,
+    controls: mpsc::Receiver<Control>,
+) where
     S: AsyncRead + AsyncWrite + Unpin,
 {
     let _exit = DriverExit(shared.clone());
@@ -409,7 +521,7 @@ where
         result = async {
             tokio::try_join!(
                 receive_loop(reader, &shared),
-                send_loop(writer, &shared, commands),
+                send_loop(writer, &shared, commands, controls),
                 expire_loop(&shared),
             )
         } => {
@@ -418,7 +530,7 @@ where
     }
 }
 
-async fn receive_loop<R: AsyncRead + Unpin>(mut reader: R, shared: &Shared) -> Result<()> {
+async fn receive_loop<R: AsyncRead + Unpin>(mut reader: R, shared: &Arc<Shared>) -> Result<()> {
     loop {
         let mut fixed = [0; FIXED_HEADER_SIZE];
         // An idle connection has no inactivity deadline. Once a frame starts,
@@ -456,6 +568,26 @@ async fn receive_loop<R: AsyncRead + Unpin>(mut reader: R, shared: &Shared) -> R
                 _ => "unsupported transport control",
             }));
         }
+        if properties.uncorrelated_reply {
+            if let Some(handler) = &shared.reverse {
+                if properties.actor != 5
+                    || properties.action != "ServiceNotificationRequest"
+                    || properties.id == MessageId::default()
+                    || properties.relates_to != MessageId::default()
+                    || properties.fault.is_some()
+                {
+                    return Err(Error::Protocol("unsupported reverse notification envelope"));
+                }
+                handler(ReverseRequest {
+                    message: reply,
+                    context: ReplyContext {
+                        shared: Arc::downgrade(shared),
+                        id: properties.id,
+                    },
+                })?;
+                continue;
+            }
+        }
         if properties.uncorrelated_reply || properties.expects_reply {
             return Err(Error::Protocol("reverse requests are unsupported"));
         }
@@ -485,8 +617,28 @@ async fn send_loop<W: AsyncWrite + Unpin>(
     mut writer: W,
     shared: &Shared,
     mut commands: mpsc::Receiver<Outbound>,
+    mut controls: mpsc::Receiver<Control>,
 ) -> Result<()> {
-    while let Some(command) = commands.recv().await {
+    loop {
+        let command = tokio::select! {
+            biased;
+            control = controls.recv() => {
+                let Some(control) = control else { return Err(Error::Closed); };
+                if Instant::now() >= control.deadline {
+                    let _ = control.complete.send(Err(Error::Timeout));
+                    continue;
+                }
+                let result = timeout(MAX_FRAME_TIME, writer.write_all(&control.bytes))
+                    .await.map_err(|_| Error::Timeout)?.map_err(Error::from);
+                let _ = control.complete.send(result.clone());
+                result?;
+                continue;
+            }
+            command = commands.recv() => {
+                let Some(command) = command else { return Err(Error::Closed); };
+                command
+            }
+        };
         if !shared
             .inner
             .lock()
@@ -506,7 +658,6 @@ async fn send_loop<W: AsyncWrite + Unpin>(
             .await
             .map_err(|_| Error::Timeout)??;
     }
-    Err(Error::Closed)
 }
 
 async fn expire_loop(shared: &Shared) -> Result<()> {
