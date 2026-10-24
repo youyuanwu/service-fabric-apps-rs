@@ -387,6 +387,11 @@ helpers retain protocol framing distinct from domain records, including both
 native list/item slots and their required empty/null checks. Operations declare
 shared `ListReply<Record, TAG, STRICT_PAGING>` or `ItemReply<Record, TAG, ACTOR>`
 profiles with optional record-validation hooks, not handwritten reply decoders.
+Partition, replica/instance and node-local deployed-application lists follow the
+same pattern: parameter-owned query declarations, source-ordered native records
+and shared list envelopes. Partition-key and replica-kind differences belong to
+their domain models, not additional transport workflows. Query pages remain
+explicit and do not provide service endpoint resolution or a cluster snapshot.
 A shared `decode_reply<Q>` function dispatches to the profile and validator
 outside the `Query` trait, symmetric with the shared request encoder.
 The shared schemas use `EmptyObjectArray` for the forbidden item-result list
