@@ -1,7 +1,10 @@
 # Pure Rust FabricClient design
 
-**Status:** proposed; no Rust wire implementation or live interoperability is
-claimed by this document.
+**Status:** broader production design remains proposed. The experimental
+[clear-TCP subset](../RustFabricClient.md) implements native requests, uncached
+partition resolution and independently owned notification sessions, with
+recorded SF 11.8.121.4 coverage and explicit limitations. This does not complete
+the TLS/authentication/recovery requirements below.
 
 ## 1. Goal and protocol baseline
 
@@ -984,7 +987,8 @@ The gateway may still use its own caches.
 Do not claim support for the older resolution-change callback API by
 implementing notification filters alone; it is a distinct public behavior.
 See [uncached resolution and notifications](ServiceResolutionNotifications.md)
-for the proposed API, cache boundary, wire mapping, and initial delivery scope.
+for the implemented experimental API, cache boundary, native wire mapping, and
+initial delivery scope.
 [Source: [native resolution behavior](../FabricClient.md#73-service-resolution-and-older-change-callbacks).]
 
 ### 11.4 Notifications

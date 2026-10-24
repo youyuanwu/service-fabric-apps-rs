@@ -1,7 +1,9 @@
 # Uncached service resolution and notifications
 
-**Status:** proposed. These APIs are not implemented or qualified against a live
-gateway. This design extends the current [Rust FabricClient](../RustFabricClient.md);
+**Status:** implemented as an experimental clear-TCP subset in `mssf-client`
+and `mssf-transport`, with native qualification on SF 11.8.121.4. See
+[usage, measured coverage and limitations](../RustFabricClient.md#owned-resolution-and-notification-qualification).
+This design extends the current [Rust FabricClient](../RustFabricClient.md);
 it does not claim TLS, automatic recovery, or native-client feature parity.
 
 ## 1. Scope and decisions
@@ -28,8 +30,9 @@ commit [`3988b4518236d2d0a37f4d8bdcdf0a2093c5a61d`][native-revision].
 
 ## 2. Public API
 
-Signatures below are proposed Rust API shapes, not compilable declarations of
-existing methods. Each client's `connect_clear(endpoint, timeout)` takes a
+Signatures below describe the implemented Rust API shapes; the snippets omit
+imports and private fields rather than being standalone declarations.
+Each client's `connect_clear(endpoint, timeout)` takes a
 required duration that bounds establishment and sets its own operation default.
 Subsequent remote operations follow the current timeout convention: `None` uses
 that client's configured default, not infinity; `Some(duration)` supplies one
@@ -256,7 +259,7 @@ Client -> Gateway: actor NamingGateway (5), action ResolveServiceRequest
     bypassCache_
   }
 
-Gateway -> Client: ResolveServiceReply
+Gateway -> Client: ResolveServiceRequest (native reply action)
   ResolvedServicePartition {
     isServiceGroup_, locations_, partitionData_,
     storeVersion_, generation_, psd_
@@ -264,6 +267,10 @@ Gateway -> Client: ResolveServiceReply
 ```
 
 The declarations show native serialization order, not Rust in-memory layout.
+Despite the separately declared `ResolveServiceReply` action string, native
+`NamingMessage::GetResolveServiceReply` constructs the message using
+`ResolveServiceAction` (`ResolveServiceRequest`). Validate the actual action,
+not the factory's name. [Source: [reply factory][resolve-reply-factory].]
 Use the existing bounded native Serde facilities and normal request correlation,
 remaining-time headers, fault handling, and operation-local native errors.
 
@@ -350,6 +357,9 @@ session exchange. Its actual gateway can differ behind a load balancer; retain
 the identity returned by the session connection reply instead of assuming the
 ordinary connection's identity. Validate native priority-path behavior during
 live qualification; opening another socket alone is not evidence of support.
+Native notification gateway descriptions intentionally omit a public address;
+retain their node identity/name without requiring or inventing an address.
+[Source: [gateway description][notification-gateway-description].]
 
 Extend `mssf-transport` with explicit duplex capability for this connection role.
 Normal request-only connections continue to reject unsupported reverse traffic.
@@ -379,6 +389,12 @@ whose write has already started.
 | Client to gateway | `ServiceNotificationReply` | `error_` |
 | Client to gateway, when synchronization requires it | `NotificationClientSynchronizationRequest` | `clientId_, generation_, undeletedPartitionsToCheck_` |
 | Gateway to client | `NotificationClientSynchronizationReply` | `generation_, deletedVersions_` |
+
+C++ vectors of shared pointers (initial filters and notification entries) encode
+a UInt32 count followed by direct pointer values, **not** object-array slots.
+Version-range value vectors remain native object arrays. Reuse the bounded
+`CountedValues`/`Pointer` and object-array adapters accordingly.
+[Source: [shared-pointer vectors][pointer-vectors].]
 
 A fresh notification client starts a session with a new native client ID, no
 filters, and native empty generation/version state.
@@ -439,7 +455,7 @@ notification cannot be treated as an empty success.
 
 Use named internal limits, not new public configuration in the first API:
 
-| Resource | Proposed initial bound |
+| Resource | Initial implemented bound |
 |---|---|
 | Queued user updates | 256 entries and 8 MiB of accounted decoded memory, whichever is reached first. |
 | Registered, pending, or cleaning-up filters | 32 per session; dropping a guard does not release its slot until cleanup completes or the session closes. |
@@ -643,3 +659,6 @@ APIs from demonstrated coverage.
 [reverse-request]: https://github.com/microsoft/service-fabric/blob/3988b4518236d2d0a37f4d8bdcdf0a2093c5a61d/src/prod/src/Transport/requestreply.cpp#L263-L280
 [duplex]: https://github.com/microsoft/service-fabric/blob/3988b4518236d2d0a37f4d8bdcdf0a2093c5a61d/src/prod/src/Transport/DuplexRequestReply.cpp#L36-L77
 [receiver-reply]: https://github.com/microsoft/service-fabric/blob/3988b4518236d2d0a37f4d8bdcdf0a2093c5a61d/src/prod/src/Transport/ReceiverContext.cpp#L25-L39
+[resolve-reply-factory]: https://github.com/microsoft/service-fabric/blob/3988b4518236d2d0a37f4d8bdcdf0a2093c5a61d/src/prod/src/Naming/NamingMessage.h#L110-L116
+[notification-gateway-description]: https://github.com/microsoft/service-fabric/blob/3988b4518236d2d0a37f4d8bdcdf0a2093c5a61d/src/prod/src/Naming/ServiceNotificationManager.cpp#L1141-L1147
+[pointer-vectors]: https://github.com/microsoft/service-fabric/blob/3988b4518236d2d0a37f4d8bdcdf0a2093c5a61d/src/prod/src/Common/FabricSerializationHelper.h#L4732-L4753

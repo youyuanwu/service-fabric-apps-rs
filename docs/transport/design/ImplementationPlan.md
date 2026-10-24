@@ -2,6 +2,11 @@
 
 **Status:** proposed; all implementation phases are pending.
 
+The focused [uncached resolution/notification scope](ServiceResolutionNotifications.md)
+is now implemented and qualified as an experimental clear-TCP subset on
+SF 11.8.121.4; see the [current coverage guide](../RustFabricClient.md).
+This does not mark the broader production/TLS/recovery phase gates below complete.
+
 An initial [clear-TCP Rust POC](../RustFabricClient.md) now demonstrates native
 gateway ping, NameExists and typed GetNodeList pages against Ubuntu onebox runtime
 11.8.121.4. It is a
