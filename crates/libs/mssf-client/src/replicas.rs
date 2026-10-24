@@ -31,7 +31,11 @@ bitflags::bitflags! {
 pub struct ReplicaQueryParameters {
     #[serde(rename = "PartitionId")]
     pub partition_id: Uuid,
-    #[serde(rename = "ReplicaId", default, skip_serializing_if = "is_none_or_zero")]
+    #[serde(
+        rename = "ReplicaId",
+        default,
+        skip_serializing_if = "crate::query_arguments::is_none_or_zero"
+    )]
     pub replica_or_instance_id: Option<i64>,
     #[serde(
         rename = "ReplicaStatusFilter",
@@ -50,10 +54,6 @@ impl ReplicaQueryParameters {
             status_filter: ReplicaStatusFilter::DEFAULT,
         }
     }
-}
-
-fn is_none_or_zero(id: &Option<i64>) -> bool {
-    id.is_none_or(|id| id == 0)
 }
 
 /// One replica request with separate paging. The native query supports tokens,

@@ -16,7 +16,7 @@ pub struct PartitionQueryParameters {
     #[serde(
         rename = "PartitionId",
         default,
-        skip_serializing_if = "is_none_or_nil"
+        skip_serializing_if = "crate::query_arguments::is_none_or_nil"
     )]
     pub partition_id: Option<Uuid>,
 }
@@ -28,10 +28,6 @@ impl PartitionQueryParameters {
             partition_id: None,
         }
     }
-}
-
-fn is_none_or_nil(id: &Option<Uuid>) -> bool {
-    id.is_none_or(|id| id.is_nil())
 }
 
 /// One partition request with separate paging. The native query supports tokens,
