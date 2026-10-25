@@ -31,6 +31,9 @@ The final positional items are `close|abort`, the application URI, and zero or m
 declared `NAME=VALUE` overrides. Values containing spaces must be quoted for the
 **calling shell** so the entire assignment arrives as one CLI argument; the host
 never invokes a shell for application arguments. Duplicate/unknown overrides fail.
+Directory paths may be relative to the caller's working directory. Native/dependency
+directories are canonicalized before launch, so loader paths remain absolute when
+the child changes to its manifest Work or CodePackage directory.
 Use actual declared parameter names instead of `Count` for your package.
 Legacy five-position `bootstrap|close|abort` invocation is unchanged.
 
@@ -69,6 +72,12 @@ release. A still-running app is killed only through its owned process group and
 reaped; `cleanup.forced=true` is expected. `runtime_unregistered=false` means no
 actual unregister was observed, not graceful release inferred from termination.
 Run directories are retained for inspection, not automatically removed.
+Linux cleanup retains an exited leader's waitable identity until its process group
+has no running members, including ordinary helpers; it then reaps the direct child.
+`cleanup.process_group_drained` reports that separate observation. Helpers are not
+mistakenly left alive just because the leader exited; helper zombie reaping belongs
+to their actual parent/adopter. Escaped groups and abrupt supervisor-death recovery
+beyond direct-child parent-death containment remain outside qualification.
 
 ## Exact supported XML subset
 
@@ -203,6 +212,15 @@ plus `build/manifest-test-host-opaque-evidence` and `build/manifest-test-host-cl
 The empty-resource variant is in `build/manifest-test-host-empty-endpoint-evidence`.
 These contain bounded logs/raw reports, not copies of native libraries.
 Existing bootstrap/close/abort also passed after these changes.
+
+After final-review fixes to group cleanup and caller-relative loader paths, all
+five scenarios passed again: `build/manifest-test-host-final-evidence`. The final
+manifest Close/Abort PIDs were 386066/386176, endpoints `127.0.0.1:38727`/
+`127.0.0.1:43639`; both had forced/reaped cleanup and process_group_drained=true.
+Opaque Close passed again under `build/manifest-test-host-final-opaque-evidence`
+(PID386339). A direct CLI command with relative native/dependency/package/run paths
+passed under `build/manifest-test-host-relative-evidence` (PID386358,
+`127.0.0.1:38171`). Native-free regression coverage now includes 29 Rust tests.
 
 Qualification does not include the mssf-com 0.10 activation `get_ApplicationName`
 binding: generated Rust uses an out-struct return for FABRIC_URI whereas native

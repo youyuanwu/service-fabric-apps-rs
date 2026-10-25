@@ -474,14 +474,17 @@ fn run_deployment(
     fixture: bool,
     observer: &mut dyn FnMut(LifecycleEvent<'_>) -> Result<()>,
 ) -> Result<RunReport> {
+    // Resolve caller-relative loader inputs before changing the child's cwd.
+    let (native_directory, dependency_directory) =
+        process::absolute_directories(native_directory, dependency_directory)?;
     let listener = TcpListener::bind("127.0.0.1:0")?;
     listener.set_nonblocking(true)?;
     let address = listener.local_addr()?.to_string();
     let host = uuid::Uuid::new_v4().to_string();
     let mut child = process::OwnedApp::launch(
         &bundle,
-        native_directory,
-        dependency_directory,
+        &native_directory,
+        &dependency_directory,
         &host,
         &address,
     )?;
