@@ -221,6 +221,7 @@ async fn constructor_preserves_notification_ingress_lag_before_session_reply() {
 async fn decoded_storage_overflow_sends_failure_ack_and_terminates_without_delivery() {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let address = listener.local_addr().unwrap();
+    let (registered, registration_done) = tokio::sync::oneshot::channel();
     let task = tokio::spawn(async move {
         let (mut stream, id) = connect_peer(listener).await;
         let request = read_message(&mut stream).await.unwrap();
@@ -231,6 +232,8 @@ async fn decoded_storage_overflow_sends_failure_ack_and_terminates_without_deliv
         )
         .await
         .unwrap();
+        // The injected failure must follow local registration completion.
+        registration_done.await.unwrap();
         // Small empty strings have little wire storage but large Vec<String>
         // backing storage. Entry count alone is below the delivery limit.
         let page = page_with_endpoints(91, 1, 32, &vec![String::new(); 4096]);
@@ -243,10 +246,52 @@ async fn decoded_storage_overflow_sends_failure_ack_and_terminates_without_deliv
         .await
         .unwrap();
     let _registration = client.register_filter(&filter(), None).await.unwrap();
+    registered.send(()).unwrap();
     assert!(matches!(
         client.recv().await,
         Some(Err(NotificationError::Lagged))
     ));
     assert!(client.recv().await.is_none());
     task.await.unwrap();
+}
+
+#[tokio::test]
+async fn fatal_update_before_registration_resumes_can_fail_a_successful_gateway_reply() {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let (seen, request_seen) = tokio::sync::oneshot::channel();
+    let task = tokio::spawn(async move {
+        let (mut stream, id) = connect_peer(listener).await;
+        let request = read_message(&mut stream).await.unwrap();
+        register(&request, &id);
+        seen.send(()).unwrap();
+        write_message(
+            &mut stream,
+            &peer::reply(&request, "RegisterServiceNotificationFilterReply", vec![]),
+        )
+        .await
+        .unwrap();
+        let page = page_with_endpoints(92, 1, 32, &vec![String::new(); 4096]);
+        write_message(&mut stream, &page).await.unwrap();
+        ack(&mut stream, 92, false).await;
+        assert!(read_message(&mut stream).await.is_err());
+    });
+    let mut client = ServiceNotificationClient::connect_clear(address, WAIT)
+        .await
+        .unwrap();
+    let description = filter();
+    let mut pending = Box::pin(client.register_filter(&description, None));
+    tokio::select! {
+        biased;
+        _ = request_seen => {}
+        result = &mut pending => panic!("registration resumed too early: {}", result.is_ok()),
+    }
+    // Let the worker process the fatal page without polling the registration.
+    task.await.unwrap();
+    assert!(matches!(pending.await, Err(NotificationError::Lagged)));
+    assert!(matches!(
+        client.recv().await,
+        Some(Err(NotificationError::Lagged))
+    ));
+    assert!(client.recv().await.is_none());
 }

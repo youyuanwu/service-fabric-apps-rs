@@ -484,6 +484,7 @@ async fn early_update_retry_explicit_and_drop_cleanup_and_surviving_guard_close(
 async fn full_delivery_reports_terminal_once_and_does_not_ack_lost_page_success() {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
+    let (registered, registration_done) = tokio::sync::oneshot::channel();
     let task = tokio::spawn(async move {
         let (mut s, id) = connect_peer(listener).await;
         let req = read_message(&mut s).await.unwrap();
@@ -494,6 +495,8 @@ async fn full_delivery_reports_terminal_once_and_does_not_ack_lost_page_success(
         )
         .await
         .unwrap();
+        // The injected failure must follow local registration completion.
+        registration_done.await.unwrap();
         write_message(&mut s, &page(1, 1, 256)).await.unwrap();
         ack(&mut s, 1, true).await;
         write_message(&mut s, &page(2, 1000, 1)).await.unwrap();
@@ -504,6 +507,7 @@ async fn full_delivery_reports_terminal_once_and_does_not_ack_lost_page_success(
         .await
         .unwrap();
     let _guard = client.register_filter(&filter(), None).await.unwrap();
+    registered.send(()).unwrap();
     task.await.unwrap();
     assert!(matches!(
         client.recv().await,
