@@ -5,6 +5,7 @@ mod controller;
 mod deployment;
 mod ipc;
 mod lifecycle_wire;
+mod manifest;
 mod process;
 #[cfg(test)]
 mod tests;
@@ -25,6 +26,15 @@ use std::{
 };
 
 pub type Result<T> = std::result::Result<T, HostError>;
+
+/// Validate the supported manifest subset without native libraries or app launch.
+pub fn validate_manifest(
+    package_directory: &std::path::Path,
+    application_name: &str,
+    parameters: &[(String, String)],
+) -> Result<()> {
+    manifest::Package::load(package_directory, application_name, parameters).map(|_| ())
+}
 
 #[derive(Debug)]
 pub struct HostError(pub String);
