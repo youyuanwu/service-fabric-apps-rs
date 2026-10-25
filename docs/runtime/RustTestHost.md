@@ -16,12 +16,14 @@ Pure Rust runtime:     native node <-> Rust app-side runtime <-> service
 Rust test host:        Rust node-side subset <-> native runtime <-> real service
 ```
 
-**Status:** design only. No clusterless app launch or Rust test-host
-interoperability was demonstrated by this documentation work. Native source
+**Status:** the narrow stateless MVP in section 2 is implemented and has run
+against a real native FabricRuntime without a cluster. Sections 3–11 preserve
+the broader design/reference and are **not a claim that all proposed capabilities
+are implemented**. Native source
 baseline is `3988b4518236d2d0a37f4d8bdcdf0a2093c5a61d`; repository baseline is
 `e87b47ad1f36e8fa37f3b392bed7a8b2226bee75`, inspected 2026-10-25.
-Private protocols must be qualified against the installed app-side runtime,
-not assumed to match the repository's 11.8.121.4 image.
+Private protocols must be qualified against the actual app-side runtime;
+section 2 records the binary profile and measured outcomes separately from source research.
 
 **Standalone does not mean SDK/library-free applications, production RA
 equivalence, a full application deployer, or a security sandbox.** The Rust host
@@ -30,17 +32,168 @@ runtime libraries/configuration; a managed app additionally needs its managed
 runtime and supported SDK stack. It may also need native replication/logging
 components. Absence of a cluster does not remove those dependencies.
 
-## 2. First supported profile
+## 2. Implemented MVP and usage
 
-Start with one version-pinned **Linux activated single-code-package ExeHost**,
-ordinary stateless factories, and a qualified local IPC transport policy.
-The host launches the executable directly with a private environment and
-deployment directory. It implements the node-facing contracts, not a fake
-`FabricCreateRuntime` DLL or an in-process COM factory wrapper.
+### 2.1 Supported boundary
+
+[`mssf-test-host`](../../crates/libs/mssf-test-host/src/lib.rs) is a native-free
+Rust library and thin CLI. It controls
+[`stateless-test-app`](../../crates/samples/stateless-test-app/src/main.rs),
+which uses **mssf-core 0.10 and the real native FabricRuntime**. It does not
+implement a pure-Rust application runtime or fake `FabricCreateRuntime`.
+
+The implemented profile is deliberately smaller than the design below:
+
+- Linux x86_64, **11.8.121.4 Ubuntu22 native package**, exact native Runtime/Common
+  SHA256 pins checked by the library and preparation helper.
+- One owned activated single-code-package ExeHost, one stateless factory and
+  one singleton partition/instance. The only partition API exercised is
+  singleton information; no stateful/replication API is implemented by the host.
+- Loopback-only clear TCP IPC on the app's outbound connection, native
+  ListenInstance, HostId/real-PID admission, correlated registration replies
+  and actor **RA12** one-way lifecycle commands/semantic replies.
+- Host start/finish/unregister and runtime register/unregister/type registration
+  handlers, learned native runtime ID, and finite 30-second lease replies.
+  There is no service-type-unregister action.
+- Actual factory/Open, independently connected `ping\n`/`native-stateless-pong\n`,
+  actual Close or Abort, refused new endpoint connections **while the process
+  is still alive**, then separately observed child termination/reap.
+- Fresh owned deployment/config/native-object folders; no installed cluster
+  config discovery, cluster commands, global configuration changes or name kills.
+- A 120-second scenario deadline, 4MiB frame/object limits, a 64-message input
+  queue, bounded native log retention (1MiB/4096 lines, 16KiB line chunks),
+  and a 10-second owned cleanup deadline. Failures do not become successful
+  scenarios merely because cleanup succeeds.
+
+This trusted loopback profile is not authentication or a sandbox, and must not
+be exposed to untrusted local users. Do not attach it to production/secure
+deployments or disable existing security/runtime-access policy. TLS, credentials,
+Naming/FabricClient, full RA/FM/cluster, upgrades, service groups, multiple app
+processes/partitions and non-Linux profiles are not supported.
+
+### 2.2 Prerequisites and commands
+
+Use the repository's Rust toolchain and Python **3.11+**. Obtain the native package
+without installing/starting node services:
+
+```sh
+python3 scripts/native_runtime_test.py prepare
+```
+
+This downloads and SHA256-verifies `ServiceFabric.U22.11.8.121.4.deb`, then uses
+`dpkg-deb --extract` under ignored `build/native-runtime-test-host/runtime`.
+It does **not** install an SF node, .NET or a service. Native libraries remain
+required by the app; they are not required by the Rust host library.
+
+Supply the native package's compatible OS ABI libraries through the ordinary
+loader or `--dependency-directory`. Missing libraries are reported by preflight,
+not replaced with stubs. This machine needed these six private files:
+`libcgroup.so.1`, `liblttng-ust.so.1`, `liblttng-ust-common.so.1`,
+`liblttng-ust-tracepoint.so.1`, `libnuma.so.1`, `libssh2.so.1`.
+On a compatible Ubuntu installation these may already be provided by its
+packages; otherwise extract matching distro packages into private storage.
+Do not replace system libc/loader files or create global compatibility symlinks.
+Other distributions/ABI combinations are not implied by this qualification.
+
+```sh
+python3 scripts/native_runtime_test.py bootstrap
+python3 scripts/native_runtime_test.py close
+python3 scripts/native_runtime_test.py abort
+```
+
+Each invocation builds the app/host with `--locked` and creates fresh host,
+runtime and partition identities. `--root`, `--native-directory` and
+`--dependency-directory` select explicit locations. The default dependency
+directory is `build/native-runtime-test-host/deps`. Containers are not needed
+to execute the host/app; no cluster/onebox is used.
+
+`bootstrap` qualifies registration/finite polling and graceful runtime release.
+`close` adds Open/ping/Close, runtime unregistration and exit status 0.
+`abort` starts a **fresh** app, verifies Abort rather than Close, then deliberately
+kills only its still-owned process group and reaps the direct child. That forced
+cleanup is expected and is separately reported, not described as graceful exit.
+
+The final `MSSF_REPORT` JSON contains scenario, run root, native profile, host/PID,
+learned runtime/partition identity, finite poll count, actual native-library
+mappings from the app's `/proc/<pid>/maps`, endpoint, observed callback arguments
+and cleanup status. `MSSF_HOST` marks protocol/probe observations; `MSSF_NATIVE`
+contains bounded collected diagnostics. Failure is a nonzero command exit.
+Directories are retained for inspection and never recursively removed by the
+runner. Use a fresh `--root` if a failed download/extraction needs recovery.
+
+The minimal library API is `run(Options, Scenario) -> Result<RunReport>`, with
+`Scenario::{Bootstrap, Close, Abort}`. It executes one complete bounded scenario;
+the richer handle API sketched in section 4 is **not implemented**. The sample's
+owned stdin shutdown commands and `MSSF_APP` diagnostic events are fixture
+instrumentation; they do not replace native lifecycle callbacks or semantic replies.
+
+### 2.3 Actual native qualification, 2026-10-25
+
+Execution used Ubuntu24.04 x86_64 with the extracted Ubuntu22 SF package and the
+six matching ABI files in private storage. Those ABI files were copied from
+the existing cached Ubuntu22 image using a **stopped, never-started extraction
+container**, which was then removed. This was artifact acquisition only, not
+containerized app execution or a runtime prerequisite. The host/app ran as the
+ordinary user directly on Linux. No Fabric/FabricHost/node service was launched.
+
+| Native artifact | SHA256 |
+|---|---|
+| ServiceFabric.U22.11.8.121.4.deb | `fbcb0b8d52e84b7e2bf9c336d9e0ece8cb9ff7fa1de53367d56c6ff8ab850c83` |
+| libFabricRuntime.so | `9ce2cac38006b12c8a6b4ef5735f0ab9d8e9ab29f09a7a414e2dc5b329c5046f` |
+| libFabricCommon.so | `650ea380d8a892d9015c7159ed09c2b23935b3a0f529c7f3e4b6cf9a2a82414f` |
+
+The source baseline is a contract-research baseline, **not** a statement that
+this package was built from that commit. Real execution corrected two
+assumptions: native client-only ListenInstance has empty address/instance 0,
+and the deployed XSD requires Diagnostics in the digested environment/package.
+The private generated manifests, empty endpoint/principal files and null
+shared-log settings were accepted by the real runtime for this sample.
+
+Final repeated runs after native hash checks, private lock isolation and
+verification of the actual native-library mappings in the app:
+
+| Command | Observed evidence | Result |
+|---|---|---|
+| `python3 scripts/native_runtime_test.py bootstrap` | PID 341024; native runtime `08f8bcbd-71ea-ba4c-aaf9-4ea8af60e11a`; real registration/context/type callback; finite lease poll; runtime unregister | exit 0, graceful/reaped |
+| `python3 scripts/native_runtime_test.py close` | PID 341109; runtime `46f3e694-f008-0741-a37c-b5d69ab13837`; partition `76023d10-bb5c-4735-840a-a9e7558f704f`; actual endpoint `127.0.0.1:38951`; factory/Open, ping, Close, matched flags0 reply, refused endpoint, unregister | exit 0, forced=false, reaped=true |
+| `python3 scripts/native_runtime_test.py abort` | fresh PID 341196; runtime `67200dc5-c35b-8847-85b3-402f94bd1bc9`; actual endpoint `127.0.0.1:43433`; factory/Open, ping, Abort with **no Close**, matched flags4 reply, refused endpoint while alive | scenario exit 0, owned SIGKILL, forced=true, reaped=true |
+
+These are **actual native acceptance observations**, not Rust-generated request/
+Rust-decoder roundtrips. Native-free regressions cover malformed input, stale
+partition/epoch/replica/instance/flags, unsupported actions, error propagation,
+endpoint admission and owned cleanup; they do not self-authenticate the schemas.
+
+### 2.4 Compatibility limits
+
+- Only the bundled report-free sample and short scenarios above are qualified.
+  Native health clients initialize, but no health/load/fault report was needed or
+  emitted in these measured runs. There is **no general report/health sink**;
+  unsupported traffic fails rather than receiving a canned success.
+- The initial finite TTL is interpreted as an already-past expiration by the
+  inspected native path and schedules a 1-second poll. Real native diagnostics
+  then show expiration updated from monotonic request-send time plus the finite
+  30-second reply TTL. There is no infinite-lease/absolute-expiration workaround.
+  **Actual expiry/invalidation/fencing behavior remains unqualified.**
+- Runtime unregistration was observed. Host-unregister decoding/validation is
+  implemented, but automatic native host-unregister emission on process exit
+  was **not** observed/qualified. Reconnect/replay, registration retries and
+  long-running background traffic are unsupported.
+- Open waits for the fixture's actual post-registration callback plus a lease
+  poll, eliminating its local-registration race without a synthetic readiness
+  sleep. This is not a claim to launch arbitrary apps unchanged.
+- Cleanup owns the direct child/process group, not arbitrary daemonized or
+  escaped descendants. The sample does not spawn them. Linux parent-death
+  containment kills the direct child if its launcher dies; abrupt-owner-death
+  and detached-descendant recovery are not native-qualified scenarios.
+- Native KTL/log/transactional initialization remains native code. Successful
+  stateless startup with null shared-log inputs proves no stateful storage,
+  replication, lease fencing, quorum or production RA behavior.
+
+### 2.5 Broader design profiles (not implemented)
 
 | Profile | Intended coverage |
 |---|---|
-| Initial stateless | Real runtime boot, type registration, open/close/abort, real application RPC and reporting |
+| Initial stateless | Section 2 MVP implements real runtime boot/type registration/lifecycle/RPC; general reporting remains future work |
 | Later singleton stateful | Native default replicator under a deliberately single-replica test configuration; no HA claim |
 | Later multi-process stateful | Several native app processes with real peer replication and scripted RA reconfiguration |
 | Separate extensions | Container/TLS, Windows security, nonactivated/DLL/multicode-package hosts, managed SDK variants, upgrades and service groups |
@@ -475,6 +628,9 @@ processes by name, stop a running onebox, or modify machine SF services.
 
 ## 9. Milestones and acceptance evidence
 
+This is the broader design roadmap. Section 2 is the implemented/qualified
+subset; this table does not mark the remaining profiles or resilience cases done.
+
 | Milestone | Deliverable | Exit evidence |
 |---|---|---|
 | 0: native profile | Pin app runtime/build and source mapping; define a minimal executable plus complete test deployment bundle | App dependencies/config/file requirements known; no hidden connection to an existing cluster |
@@ -519,12 +675,12 @@ Native collection/stateful requirements are separate profile prerequisites.
 
 ## 11. Remaining feasibility questions
 
-The source supports a credible clusterless host design, but these still require
-actual native experiments: server-role handshake and deployed security policy;
-complete nested registration/control serializers; initial TTL behavior;
-native startup/config/KTL dependencies; valid deployment/principal/endpoint
-artifacts; complete health result/sequence behavior; and exact stateful control
-scripts. No current file in this repository implements the proposed host.
+The section 2 MVP now supplies real-native evidence for server handshake,
+registration/control schemas, a private deployment bundle, finite polling and
+stateless Open/ping/Close/Abort/cleanup in the pinned profile. Broader security
+policies, actual lease expiry/invalidation, health result/sequence behavior,
+arbitrary application packages, native storage prerequisites and stateful control
+scripts still require separate implementation and native experiments.
 
 This deliberately avoids making a production RA rewrite a prerequisite for
 app tests. It also avoids selling a registration-only mock as a working SF host.

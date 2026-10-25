@@ -21,6 +21,11 @@ FabricClient qualification is not FabricRuntime evidence. Source behavior here
 must be checked against the actual deployed build; the 11.8.121.4 onebox is not
 assumed to be built from this source revision.
 
+Subsequent implementation work qualified a narrow **node-side** standalone
+stateless test host against a real native app; see the separate
+[MVP scope and execution evidence](RustTestHost.md#2-implemented-mvp-and-usage).
+That does not implement the proposed pure-Rust application runtime.
+
 ## 2. Distinct boundaries
 
 ```text

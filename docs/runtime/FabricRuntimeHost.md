@@ -20,6 +20,11 @@ Native paths and links below refer to that revision. This is source research,
 not a running test-host implementation, a full private-protocol specification,
 or proof of compatibility with the repository's 11.8.121.4 runtime.
 
+For the subsequent narrow standalone implementation and its actual-native
+qualification, see [Rust test-host MVP](RustTestHost.md#2-implemented-mvp-and-usage).
+The broader node responsibilities described here remain a source architecture,
+not a production-RA-equivalence claim.
+
 ## 2. Which side owns what
 
 ```text

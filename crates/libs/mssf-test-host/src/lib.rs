@@ -67,10 +67,16 @@ pub enum Scenario {
 
 #[derive(Debug, serde::Serialize)]
 pub struct RunReport {
+    pub profile: String,
+    pub run_root: PathBuf,
+    pub host_id: String,
     pub scenario: Scenario,
     pub pid: u32,
     pub runtime_id: String,
     pub endpoint: Option<String>,
+    pub partition_id: Option<String>,
+    pub lease_polls: usize,
+    pub loaded_native_libraries: Vec<PathBuf>,
     pub callbacks: Vec<serde_json::Value>,
     pub cleanup: serde_json::Value,
 }
@@ -354,6 +360,9 @@ pub fn run(options: Options, scenario: Scenario) -> Result<RunReport> {
     );
     let deadline = Instant::now() + Duration::from_secs(120);
     let mut endpoint = None;
+    let mut partition_id = None;
+    let mut lease_polls = 0;
+    let mut loaded_native_libraries = Vec::new();
     let mut runtime_id = String::new();
     let outcome = (|| -> Result<()> {
         let stream = loop {
@@ -402,8 +411,26 @@ pub fn run(options: Options, scenario: Scenario) -> Result<RunReport> {
         }
         let runtime = state.runtime.as_ref().unwrap();
         runtime_id = runtime.id.clone();
+        lease_polls = state.lease_polls;
+        let maps = std::fs::read_to_string(format!("/proc/{}/maps", child.pid()))?;
+        for name in ["libFabricRuntime.so", "libFabricCommon.so"] {
+            let path = options.native_directory.join(name).canonicalize()?;
+            let escaped = path
+                .to_string_lossy()
+                .replace('\\', "\\134")
+                .replace(' ', "\\040")
+                .replace('\t', "\\011")
+                .replace('\n', "\\012");
+            require(
+                maps.lines()
+                    .any(|line| line.ends_with(&format!(" {escaped}"))),
+                &format!("native app did not map pinned library {}", path.display()),
+            )?;
+            loaded_native_libraries.push(path);
+        }
         if scenario != Scenario::Bootstrap {
             let mut unit = controller::ServiceUnit::new(runtime);
+            partition_id = Some(uuid::Uuid::from_bytes_le(unit.request.unit.id.id.0).to_string());
             unit.open(&mut session)?;
             while unit.state != controller::UnitState::Open {
                 pump(
@@ -458,7 +485,7 @@ pub fn run(options: Options, scenario: Scenario) -> Result<RunReport> {
             )?;
         }
         child.command(b"exit\n")?;
-        child.wait_exit(Instant::now() + Duration::from_secs(5))?;
+        child.wait_exit(deadline.min(Instant::now() + Duration::from_secs(5)))?;
         Ok(())
     })();
     let cleanup = child.cleanup();
@@ -503,6 +530,22 @@ pub fn run(options: Options, scenario: Scenario) -> Result<RunReport> {
                 && created["initialization"] == json!(b"native-test-host"),
             "native factory arguments mismatch",
         )?;
+        let expected_partition = partition_id.as_deref().unwrap();
+        for callback in callbacks.iter().filter(|event| {
+            ["create", "open", "close", "abort"].contains(&event["event"].as_str().unwrap_or(""))
+        }) {
+            let actual = callback["partition"]
+                .as_str()
+                .and_then(|s| uuid::Uuid::parse_str(s).ok());
+            require(
+                actual.is_some_and(|id| id.to_string() == expected_partition),
+                "native callback partition differs from commanded singleton",
+            )?;
+        }
+        require(
+            created["service"] == "Uri(\"fabric:/NativeTestHost/Singleton\")",
+            "native callback service name mismatch",
+        )?;
         require(
             callbacks.iter().any(|e| {
                 e["event"] == "open"
@@ -513,10 +556,16 @@ pub fn run(options: Options, scenario: Scenario) -> Result<RunReport> {
         )?;
     }
     Ok(RunReport {
+        profile: "linux-x86_64-11.8.121.4-loopback-clear".into(),
+        run_root: bundle.root,
+        host_id: host,
         scenario,
         pid: child.pid(),
         runtime_id,
         endpoint,
+        partition_id,
+        lease_polls,
+        loaded_native_libraries,
         callbacks,
         cleanup,
     })
