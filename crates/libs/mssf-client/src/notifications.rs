@@ -202,10 +202,9 @@ impl ServiceNotificationClient {
         let weak_receiver = Arc::downgrade(&receiver);
         let handler = Arc::new(move |request: mssf_transport::connection::ReverseRequest| {
             let receiver = weak_receiver.upgrade().ok_or(Error::Closed)?;
-            // Conservative predecode reservation covers raw input, decoded UTF-8,
-            // object/vector overhead and conversion copies. Retained events are
-            // charged separately at commit; unused reservation is then released.
-            let bytes = wire::page_allocation_bound(&request.message.body)?;
+            // Queued input is charged now; shared Serde reserves owned storage
+            // before allocation when the worker decodes the page.
+            let bytes = request.message.body.capacity() + std::mem::size_of::<Incoming>();
             let memory = receiver.budget.reserve(bytes)?;
             pages
                 .try_send(Incoming {
@@ -547,8 +546,8 @@ async fn run(
                 if let Err(error)=result { session.fail(error); break; }
             }
             incoming = pages.recv() => {
-                let Some(incoming)=incoming else { session.fail(Error::Closed); break; };
-                let decoded = wire::decode_page(&incoming.body);
+                let Some(mut incoming)=incoming else { session.fail(Error::Closed); break; };
+                let decoded = wire::decode_page(&incoming.body, &mut |bytes| incoming.memory.grow(bytes));
                 // Release input before commit releases the page reservation;
                 // an ACK wait must not retain unaccounted raw page storage.
                 drop(incoming.body);

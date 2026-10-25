@@ -416,27 +416,25 @@ impl<'a> Decoder<'a> {
     }
 
     pub fn string(&mut self) -> Result<String> {
+        self.string_with_budget(&mut |_| Ok(()))
+    }
+
+    fn string_with_budget(
+        &mut self,
+        reserve: &mut dyn FnMut(usize) -> Result<()>,
+    ) -> Result<String> {
         let bytes = self.string_bytes()?;
-        let mut value = String::with_capacity(bytes.len());
+        let length = Self::characters(bytes).try_fold(0, |length, character| {
+            character
+                .map(|character| length + character.len_utf8())
+                .map_err(|_| Error::Protocol("invalid UTF-16 string"))
+        })?;
+        reserve(length)?;
+        let mut value = String::with_capacity(length);
         for character in Self::characters(bytes) {
             value.push(character.map_err(|_| Error::Protocol("invalid UTF-16 string"))?);
         }
         Ok(value)
-    }
-
-    /// Validate/consume a string without allocating, returning an upper bound
-    /// on the UTF-8 String capacity used by `string` (including growth).
-    pub fn string_allocation_bound(&mut self) -> Result<usize> {
-        let bytes = self.string_bytes()?;
-        for character in Self::characters(bytes) {
-            character.map_err(|_| Error::Protocol("invalid UTF-16 string"))?;
-        }
-        Ok(bytes.len() * 2)
-    }
-
-    /// Validate/consume native byte-array metadata without allocating.
-    pub fn byte_array_length(&mut self) -> Result<usize> {
-        Ok(self.byte_array_bytes()?.len())
     }
 
     pub fn byte_array(&mut self) -> Result<Vec<u8>> {

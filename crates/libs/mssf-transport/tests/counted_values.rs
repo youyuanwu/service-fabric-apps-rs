@@ -1,6 +1,6 @@
 use mssf_transport::serialization::{
     serde::{from_slice, to_vec, CountedValues, Pointer},
-    Decoder, Encoder, MAX_COLLECTION_COUNT,
+    Encoder, MAX_COLLECTION_COUNT,
 };
 use serde::{Deserialize, Serialize};
 
@@ -62,27 +62,4 @@ fn counted_values_reject_oversize_counts_and_old_object_array_shape() {
         values: CountedValues((0..=MAX_COLLECTION_COUNT).map(|_| Pointer(None)).collect()),
     };
     assert!(to_vec(&values).is_err());
-}
-
-#[test]
-fn string_preflight_is_allocation_free_and_bounds_real_capacity() {
-    for text in ["", "ascii", "🦀é", "中文", &"中".repeat(1000)] {
-        let mut e = Encoder::new();
-        e.string(text).unwrap();
-        let bytes = e.finish();
-        let mut sizing = Decoder::new(&bytes);
-        let bound = sizing.string_allocation_bound().unwrap();
-        sizing.finish().unwrap();
-        let mut d = Decoder::new(&bytes);
-        let decoded = d.string().unwrap();
-        assert_eq!(decoded, text);
-        assert!(decoded.capacity() <= bound);
-        d.finish().unwrap();
-    }
-    let mut e = Encoder::new();
-    e.byte_array(&[0; 16]).unwrap();
-    let bytes = e.finish();
-    let mut d = Decoder::new(&bytes);
-    assert_eq!(d.byte_array_length().unwrap(), 16);
-    d.finish().unwrap();
 }

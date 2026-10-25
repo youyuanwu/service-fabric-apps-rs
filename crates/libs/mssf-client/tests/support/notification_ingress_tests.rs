@@ -190,3 +190,37 @@ async fn thirty_three_pages_during_connection_overflow_bounded_ingress() {
     ));
     task.await.unwrap();
 }
+
+#[tokio::test]
+async fn decoded_storage_overflow_sends_failure_ack_and_terminates_without_delivery() {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let task = tokio::spawn(async move {
+        let (mut stream, id) = connect_peer(listener).await;
+        let request = read_message(&mut stream).await.unwrap();
+        register(&request, &id);
+        write_message(
+            &mut stream,
+            &peer::reply(&request, "RegisterServiceNotificationFilterReply", vec![]),
+        )
+        .await
+        .unwrap();
+        // Small empty strings have little wire storage but large Vec<String>
+        // backing storage. Entry count alone is below the delivery limit.
+        let page = page_with_endpoints(91, 1, 32, &vec![String::new(); 4096]);
+        assert!(page.body.len() < 256 * 1024);
+        write_message(&mut stream, &page).await.unwrap();
+        ack(&mut stream, 91, false).await;
+        assert!(read_message(&mut stream).await.is_err());
+    });
+    let mut client = ServiceNotificationClient::connect_clear(address, WAIT)
+        .await
+        .unwrap();
+    let _registration = client.register_filter(&filter(), None).await.unwrap();
+    assert!(matches!(
+        client.recv().await,
+        Some(Err(Error::NotificationLag))
+    ));
+    assert!(client.recv().await.is_none());
+    task.await.unwrap();
+}

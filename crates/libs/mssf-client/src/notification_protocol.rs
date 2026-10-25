@@ -1,7 +1,9 @@
 //! Source-derived notification schemas. No endpoint description enrichment.
 use mssf_transport::{
     message::Message,
-    serialization::serde::{from_slice, to_vec, CountedValues, Guid, ObjectArray, Pointer},
+    serialization::serde::{
+        from_slice, from_slice_with_budget, to_vec, CountedValues, Guid, ObjectArray, Pointer,
+    },
 };
 use serde::{Deserialize, Serialize};
 
@@ -126,96 +128,14 @@ pub(crate) struct Page {
 pub(crate) struct PageBody {
     pub page: Pointer<Page>,
 }
-pub(crate) fn decode_page(body: &[u8]) -> Result<Page> {
-    from_slice::<PageBody>(body)?
+pub(crate) fn decode_page(
+    body: &[u8],
+    reserve: &mut impl FnMut(usize) -> Result<()>,
+) -> Result<Page> {
+    from_slice_with_budget::<PageBody>(body, reserve)?
         .page
         .0
         .ok_or(crate::Error::Protocol("null notification page"))
-}
-
-/// Allocation-free schema walk before any owned decoding. Includes wire input,
-/// geometric Vec growth, decoded strings and endpoint/name conversion copies.
-/// Unknown object suffixes are validated by the same bounded native Decoder.
-pub(crate) fn page_allocation_bound(body: &[u8]) -> Result<usize> {
-    use mssf_transport::serialization::{Decoder, MAX_COLLECTION_COUNT};
-    let mut bytes = body.len() + 4096;
-    let mut d = Decoder::new(body);
-    d.object(|d| {
-        d.pointer(|d, _| {
-            d.object(|d| {
-                d.object(|d| {
-                    d.guid()?;
-                    d.u64()?;
-                    Ok(())
-                })?;
-                d.u64()?;
-                Ok(())
-            })?;
-            d.object(|d| {
-                d.i64()?;
-                if d.byte_array_length()? != 16 {
-                    return Err(crate::Error::Protocol("invalid generation owner"));
-                }
-                Ok(())
-            })?;
-            d.pointer(|d, _| {
-                d.object_array(|d| {
-                    bytes += 128;
-                    d.i64()?;
-                    d.i64()?;
-                    Ok(())
-                })?;
-                Ok(())
-            })?;
-            let entries = d.u32()? as usize;
-            if entries > MAX_COLLECTION_COUNT {
-                return Err(crate::Error::Protocol("notification entry count limit"));
-            }
-            for _ in 0..entries {
-                bytes += 4 * std::mem::size_of::<Entry>()
-                    + 6 * std::mem::size_of::<crate::ServiceNotification>()
-                    + 256;
-                d.pointer(|d, _| {
-                    d.pointer(|d, _| {
-                        d.object(|d| {
-                            d.guid()?;
-                            Ok(())
-                        })?;
-                        bytes += d.string_allocation_bound()? * 6;
-                        d.object(|d| {
-                            d.boolean()?;
-                            d.boolean()?;
-                            bytes += d.string_allocation_bound()? * 2;
-                            let count = d.u32()? as usize;
-                            if count > MAX_COLLECTION_COUNT {
-                                return Err(crate::Error::Protocol("endpoint count limit"));
-                            }
-                            bytes += count
-                                * (4 * std::mem::size_of::<String>()
-                                    + 4 * std::mem::size_of::<crate::ServiceEndpoint>()
-                                    + 64);
-                            for _ in 0..count {
-                                bytes += d.string_allocation_bound()? * 2;
-                            }
-                            d.i64()?;
-                            Ok(())
-                        })?;
-                        d.boolean()?;
-                        Ok(())
-                    })?
-                    .ok_or(crate::Error::Protocol("null notification partition"))?;
-                    d.boolean()?;
-                    Ok(())
-                })?
-                .ok_or(crate::Error::Protocol("null notification entry"))?;
-            }
-            Ok(())
-        })?
-        .ok_or(crate::Error::Protocol("null notification page"))?;
-        Ok(())
-    })?;
-    d.finish()?;
-    Ok(bytes)
 }
 pub(crate) fn status(success: bool) -> Result<Vec<u8>> {
     #[derive(Serialize)]

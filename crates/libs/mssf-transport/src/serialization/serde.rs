@@ -208,9 +208,23 @@ pub fn to_vec<T: Serialize + ?Sized>(value: &T) -> Result<Vec<u8>> {
 
 /// Decode exactly one native value, rejecting bytes remaining outside that value.
 pub fn from_slice<'de, T: Deserialize<'de>>(bytes: &'de [u8]) -> Result<T> {
+    from_slice_with_budget(bytes, &mut |_| Ok(()))
+}
+
+/// Decode while reserving allocation capacity before creating owned data.
+///
+/// Charges cover codec-owned strings/bytes, raw type tags, and conservative
+/// standard `Vec` storage, including growth. The callback owns the reservations;
+/// charges are not refunded on errors. Additional allocations in custom
+/// deserializers/visitors or subsequent conversions require separate accounting.
+pub fn from_slice_with_budget<'de, T: Deserialize<'de>>(
+    bytes: &'de [u8],
+    reserve: &mut impl FnMut(usize) -> Result<()>,
+) -> Result<T> {
     let mut decoder = Decoder::new(bytes);
     let value = T::deserialize(Deserializer {
         decoder: &mut decoder,
+        reserve,
         mode: Mode::Value,
         type_info: None,
     })?;
@@ -248,6 +262,7 @@ pub fn from_fields<'de, T: Deserialize<'de>>(decoder: &mut Decoder<'de>) -> Resu
     }
     T::deserialize(Deserializer {
         decoder,
+        reserve: &mut |_| Ok(()),
         mode: Mode::Fields,
         type_info: None,
     })
@@ -283,11 +298,14 @@ enum Mode {
 }
 
 fn variant_code(name: &str) -> Option<i64> {
-    if name.len() > 20 {
+    if name.len() > 20
+        || name.starts_with('+')
+        || name.starts_with("-0")
+        || (name.len() > 1 && name.starts_with('0'))
+    {
         return None;
     }
-    let code = name.parse::<i64>().ok()?;
-    (code.to_string() == name).then_some(code)
+    name.parse().ok()
 }
 
 fn variant_name(
@@ -748,6 +766,7 @@ impl SerializeStructVariant for Compound<'_> {
 
 struct Deserializer<'a, 'de> {
     decoder: &'a mut Decoder<'de>,
+    reserve: &'a mut dyn FnMut(usize) -> Result<()>,
     mode: Mode,
     type_info: Option<&'de [u8]>,
 }
@@ -797,7 +816,7 @@ impl<'de> ::serde::Deserializer<'de> for Deserializer<'_, 'de> {
         if !matches!(self.mode, Mode::Value | Mode::StringElement) {
             return Err(decode_error());
         }
-        visitor.visit_string(self.decoder.string()?)
+        visitor.visit_string(self.decoder.string_with_budget(self.reserve)?)
     }
     fn deserialize_option<V: Visitor<'de>>(self, visitor: V) -> Result<V::Value> {
         match self.mode {
@@ -809,6 +828,7 @@ impl<'de> ::serde::Deserializer<'de> for Deserializer<'_, 'de> {
                         .ok_or_else(decode_error)?
                         .visit_some(Deserializer {
                             decoder,
+                            reserve: self.reserve,
                             mode: Mode::Contents,
                             type_info: Some(type_info),
                         })
@@ -821,6 +841,7 @@ impl<'de> ::serde::Deserializer<'de> for Deserializer<'_, 'de> {
             Mode::Trailing if self.decoder.is_scope_end()? => visitor.visit_none(),
             Mode::Trailing => visitor.visit_some(Self {
                 decoder: self.decoder,
+                reserve: self.reserve,
                 mode: Mode::Value,
                 type_info: None,
             }),
@@ -829,8 +850,16 @@ impl<'de> ::serde::Deserializer<'de> for Deserializer<'_, 'de> {
     }
     fn deserialize_bytes<V: Visitor<'de>>(self, visitor: V) -> Result<V::Value> {
         let value = match self.mode {
-            Mode::Value => self.decoder.byte_array()?,
-            Mode::Guid => self.decoder.guid()?.to_vec(),
+            Mode::Value => {
+                let bytes = self.decoder.byte_array_bytes()?;
+                (self.reserve)(bytes.len())?;
+                bytes.to_vec()
+            }
+            Mode::Guid => {
+                let guid = self.decoder.guid()?;
+                (self.reserve)(guid.len())?;
+                guid.to_vec()
+            }
             _ => return Err(decode_error()),
         };
         visitor.visit_byte_buf(value)
@@ -851,12 +880,14 @@ impl<'de> ::serde::Deserializer<'de> for Deserializer<'_, 'de> {
                 Mode::Value | Mode::Object => self.decoder.typed_object(|decoder, type_info| {
                     visitor.visit_newtype_struct(Deserializer {
                         decoder,
+                        reserve: self.reserve,
                         mode: Mode::EnumContents,
                         type_info: Some(type_info),
                     })
                 }),
                 Mode::Contents => visitor.visit_newtype_struct(Self {
                     decoder: self.decoder,
+                    reserve: self.reserve,
                     mode: Mode::EnumContents,
                     type_info: self.type_info,
                 }),
@@ -868,12 +899,14 @@ impl<'de> ::serde::Deserializer<'de> for Deserializer<'_, 'de> {
                 Mode::Value | Mode::Object => self.decoder.typed_object(|decoder, type_info| {
                     visitor.visit_seq(TypeAccess {
                         decoder,
+                        reserve: self.reserve,
                         type_info,
                         remaining: 2,
                     })
                 }),
                 Mode::Contents => visitor.visit_seq(TypeAccess {
                     decoder: self.decoder,
+                    reserve: self.reserve,
                     type_info: self.type_info.ok_or_else(decode_error)?,
                     remaining: 2,
                 }),
@@ -903,6 +936,7 @@ impl<'de> ::serde::Deserializer<'de> for Deserializer<'_, 'de> {
         };
         visitor.visit_newtype_struct(Self {
             decoder: self.decoder,
+            reserve: self.reserve,
             mode,
             type_info: self.type_info,
         })
@@ -922,7 +956,9 @@ impl<'de> ::serde::Deserializer<'de> for Deserializer<'_, 'de> {
         };
         let mut access = Access {
             decoder: self.decoder,
+            reserve: self.reserve,
             remaining: count,
+            sequence: true,
             mode: if self.mode == Mode::Array {
                 Mode::Object
             } else if self.mode == Mode::Strings {
@@ -983,6 +1019,7 @@ impl<'de> ::serde::Deserializer<'de> for Deserializer<'_, 'de> {
         let variant = variant_name(code, variants, numeric)?;
         visitor.visit_enum(NativeEnumAccess {
             decoder: self.decoder,
+            reserve: self.reserve,
             variant,
             numeric,
         })
@@ -1007,7 +1044,9 @@ impl<'de> Deserializer<'_, 'de> {
         let read = |decoder: &mut Decoder<'de>| {
             visitor.visit_seq(Access {
                 decoder,
+                reserve: self.reserve,
                 remaining: len,
+                sequence: false,
                 mode: Mode::Value,
             })
         };
@@ -1020,7 +1059,9 @@ impl<'de> Deserializer<'_, 'de> {
 }
 struct Access<'a, 'de> {
     decoder: &'a mut Decoder<'de>,
+    reserve: &'a mut dyn FnMut(usize) -> Result<()>,
     remaining: usize,
+    sequence: bool,
     mode: Mode,
 }
 impl<'de> SeqAccess<'de> for Access<'_, 'de> {
@@ -1029,9 +1070,19 @@ impl<'de> SeqAccess<'de> for Access<'_, 'de> {
         if self.remaining == 0 {
             return Ok(None);
         }
+        if self.sequence {
+            // Cover Vec's minimum capacity and overlapping geometric growth
+            // before the element is decoded or the visitor can push it.
+            const CAPACITY_FACTOR: usize = 8;
+            let bytes = std::mem::size_of::<T::Value>()
+                .checked_mul(CAPACITY_FACTOR)
+                .ok_or(Error::ResourceLimit("native sequence allocation"))?;
+            (self.reserve)(bytes)?;
+        }
         self.remaining -= 1;
         seed.deserialize(Deserializer {
             decoder: self.decoder,
+            reserve: self.reserve,
             mode: self.mode,
             type_info: None,
         })
@@ -1045,6 +1096,7 @@ impl<'de> SeqAccess<'de> for Access<'_, 'de> {
 
 struct NativeEnumAccess<'a, 'de> {
     decoder: &'a mut Decoder<'de>,
+    reserve: &'a mut dyn FnMut(usize) -> Result<()>,
     variant: &'static str,
     numeric: bool,
 }
@@ -1069,6 +1121,7 @@ impl<'de> VariantAccess<'de> for NativeEnumAccess<'_, 'de> {
         }
         seed.deserialize(Deserializer {
             decoder: self.decoder,
+            reserve: self.reserve,
             mode: Mode::Fields,
             type_info: None,
         })
@@ -1079,6 +1132,7 @@ impl<'de> VariantAccess<'de> for NativeEnumAccess<'_, 'de> {
         }
         Deserializer {
             decoder: self.decoder,
+            reserve: self.reserve,
             mode: Mode::Fields,
             type_info: None,
         }
@@ -1095,6 +1149,7 @@ impl<'de> VariantAccess<'de> for NativeEnumAccess<'_, 'de> {
 
 struct TypeAccess<'a, 'de> {
     decoder: &'a mut Decoder<'de>,
+    reserve: &'a mut dyn FnMut(usize) -> Result<()>,
     type_info: &'de [u8],
     remaining: usize,
 }
@@ -1104,6 +1159,7 @@ impl<'de> SeqAccess<'de> for TypeAccess<'_, 'de> {
         match self.remaining {
             2 => {
                 self.remaining -= 1;
+                (self.reserve)(self.type_info.len())?;
                 seed.deserialize(::serde::de::value::BorrowedBytesDeserializer::<Error>::new(
                     self.type_info,
                 ))
@@ -1113,6 +1169,7 @@ impl<'de> SeqAccess<'de> for TypeAccess<'_, 'de> {
                 self.remaining -= 1;
                 seed.deserialize(Deserializer {
                     decoder: self.decoder,
+                    reserve: self.reserve,
                     mode: Mode::Fields,
                     type_info: None,
                 })

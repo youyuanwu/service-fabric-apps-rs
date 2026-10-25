@@ -110,6 +110,9 @@ fn unregister(request: &Message, expected: &str) -> u64 {
     id
 }
 fn page(index: u32, version: i64, count: usize) -> Message {
+    page_with_endpoints(index, version, count, &[])
+}
+fn page_with_endpoints(index: u32, version: i64, count: usize, endpoints: &[String]) -> Message {
     Message {
         headers: vec![
             Header::actor(5).unwrap(),
@@ -157,7 +160,10 @@ fn page(index: u32, version: i64, count: usize) -> Message {
                                 e.boolean(false);
                                 e.boolean(false);
                                 e.string("")?;
-                                e.u32(0);
+                                e.u32(endpoints.len() as u32);
+                                for endpoint in endpoints {
+                                    e.string(endpoint)?;
+                                }
                                 e.i64(version + id as i64);
                                 Ok(())
                             })?;

@@ -969,10 +969,13 @@ base/derived scopes needed by node results.
 
 Notification memory accounting includes queue backing storage, input pages,
 decoded strings/vectors, conversion copies and prospective progress copies.
-An allocation-free schema walk reserves conservative capacity before owned page
-decoding. This is an accounted allocation budget, not a bound on total process
-RSS; existing transport I/O limits and separately bounded protocol state still
-apply. A page must fit as one transaction. Delivery lag and protocol-bookkeeping/
+Raw input capacity is reserved before queue admission. The shared native Serde
+decoder charges strings, bytes, and conservative sequence storage before owned
+allocation; the worker separately reserves endpoint-conversion and prospective
+progress copies before constructing them. There is no second notification-schema
+parser. This is an accounted allocation budget, not a bound on total process RSS;
+existing transport I/O limits and separately bounded protocol state still apply.
+A page must fit as one transaction. Delivery lag and protocol-bookkeeping/
 cleanup resource failures are terminal; status does not need a queue slot.
 Local filter-admission exhaustion is instead rejected before sending without
 retiring the healthy session (`ResourceLimit("notification filters")`).

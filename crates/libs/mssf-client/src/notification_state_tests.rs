@@ -184,6 +184,102 @@ fn memory_budget_is_shared_and_released_on_every_path() {
     );
 }
 
+#[test]
+fn reservation_growth_is_atomic_shared_and_released() {
+    let budget = Arc::new(Budget::default());
+    let mut memory = budget.reserve(MAX_MEMORY - 1).unwrap();
+    let occupied = budget.reserve(1).unwrap();
+    assert!(matches!(memory.grow(1), Err(Error::NotificationLag)));
+    assert_eq!(memory.bytes, MAX_MEMORY - 1);
+    assert_eq!(*budget.0.lock().unwrap(), MAX_MEMORY);
+    drop(occupied);
+    memory.grow(1).unwrap();
+    assert_eq!(memory.bytes, MAX_MEMORY);
+    assert!(matches!(
+        memory.grow(usize::MAX),
+        Err(Error::NotificationLag)
+    ));
+    drop(memory);
+    assert_eq!(*budget.0.lock().unwrap(), 0);
+}
+
+#[tokio::test]
+async fn derived_page_decoding_and_conversion_share_preallocation_budget() {
+    use mssf_transport::serialization::serde::to_vec;
+
+    let address = "opaque中🦀".repeat(1000);
+    let mut value = page(1, &[(1, 1)], &[(1, 2)]);
+    let table = value.entries.0[0]
+        .0
+        .as_mut()
+        .unwrap()
+        .entry
+        .0
+        .as_mut()
+        .unwrap();
+    table.replicas.stateful = true;
+    table.replicas.primary_valid = true;
+    table.replicas.primary = address.clone();
+    table.replicas.replicas.0.push(address.clone());
+    let body = to_vec(&PageBody {
+        page: Pointer(Some(value)),
+    })
+    .unwrap();
+    let mut decoded_bytes = 0;
+    crate::notification_protocol::decode_page(&body, &mut |bytes| {
+        decoded_bytes += bytes;
+        Ok(())
+    })
+    .unwrap();
+    let receiver = Receiver::default();
+    let fixed = receiver._queue_memory.bytes;
+    let mut progress = Progress::default();
+
+    let mut memory = receiver.budget.reserve(body.capacity()).unwrap();
+    let occupied = receiver
+        .budget
+        .reserve(MAX_MEMORY - fixed - memory.bytes - decoded_bytes)
+        .unwrap();
+    let decoded =
+        crate::notification_protocol::decode_page(&body, &mut |bytes| memory.grow(bytes)).unwrap();
+    assert_eq!(*receiver.budget.0.lock().unwrap(), MAX_MEMORY);
+    assert!(matches!(
+        progress.commit(decoded, memory, &receiver),
+        Err(Error::NotificationLag)
+    ));
+    assert!(progress.partitions.is_empty());
+    assert!(progress.ranges.is_empty());
+    assert!(receiver.inner.lock().unwrap().queue.is_empty());
+    drop(occupied);
+    assert_eq!(*receiver.budget.0.lock().unwrap(), fixed);
+
+    let mut memory = receiver.budget.reserve(body.capacity()).unwrap();
+    let occupied = receiver
+        .budget
+        .reserve(MAX_MEMORY - fixed - memory.bytes - (decoded_bytes - 1))
+        .unwrap();
+    assert!(matches!(
+        crate::notification_protocol::decode_page(&body, &mut |bytes| memory.grow(bytes)),
+        Err(Error::NotificationLag)
+    ));
+    drop(memory);
+    assert_eq!(*receiver.budget.0.lock().unwrap(), fixed + occupied.bytes);
+    drop(occupied);
+
+    let mut memory = receiver.budget.reserve(body.capacity()).unwrap();
+    let decoded =
+        crate::notification_protocol::decode_page(&body, &mut |bytes| memory.grow(bytes)).unwrap();
+    drop(body);
+    progress.commit(decoded, memory, &receiver).unwrap();
+    let event = receiver.recv().await.unwrap().unwrap();
+    assert_eq!(event.endpoints.len(), 2);
+    assert!(event
+        .endpoints
+        .iter()
+        .all(|endpoint| endpoint.address == address));
+    assert_eq!(*receiver.budget.0.lock().unwrap(), fixed);
+}
+
 #[tokio::test]
 async fn cancelled_receive_does_not_consume_and_protocol_only_pages_advance() {
     let receiver = Receiver::default();

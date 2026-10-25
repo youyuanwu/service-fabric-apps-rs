@@ -31,12 +31,16 @@ pub(crate) struct Memory {
     bytes: usize,
 }
 impl Budget {
-    pub fn reserve(self: &Arc<Self>, bytes: usize) -> Result<Memory> {
+    fn charge(&self, bytes: usize) -> Result<()> {
         let mut used = self.0.lock().unwrap();
         if bytes > MAX_MEMORY.saturating_sub(*used) {
             return Err(Error::NotificationLag);
         }
         *used += bytes;
+        Ok(())
+    }
+    pub fn reserve(self: &Arc<Self>, bytes: usize) -> Result<Memory> {
+        self.charge(bytes)?;
         Ok(Memory {
             budget: self.clone(),
             bytes,
@@ -44,6 +48,11 @@ impl Budget {
     }
 }
 impl Memory {
+    pub fn grow(&mut self, bytes: usize) -> Result<()> {
+        self.budget.charge(bytes)?;
+        self.bytes += bytes;
+        Ok(())
+    }
     fn split(&mut self, bytes: usize) -> Result<Self> {
         if bytes > self.bytes {
             return Err(Error::ResourceLimit("decoded notification accounting"));
@@ -180,6 +189,24 @@ impl Progress {
                 .entry
                 .0
                 .ok_or(Error::Protocol("null notification partition"))?;
+            // Decoding is already charged. Reserve the additional DTO/name/
+            // endpoint copies and growing update/admission containers before
+            // constructing them; no wire schema is walked a second time.
+            let endpoints =
+                table.replicas.replicas.0.len() + usize::from(table.replicas.primary_valid);
+            let conversion_bytes = 8
+                * (size_of::<ServiceNotification>() + size_of::<(ServiceNotification, Memory)>())
+                + table.name.len() * 4
+                + endpoints * 4 * size_of::<crate::ServiceEndpoint>()
+                + table.replicas.primary.len()
+                + table
+                    .replicas
+                    .replicas
+                    .0
+                    .iter()
+                    .map(String::len)
+                    .sum::<usize>();
+            memory.grow(conversion_bytes)?;
             let version = table.identity(page.generation)?;
             let lookup = version.lookup;
             if next
