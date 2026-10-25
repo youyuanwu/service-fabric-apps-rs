@@ -109,6 +109,15 @@ results and notification updates use the same endpoint-version type.
 ### 2.2 Standalone notification client
 
 ```rust
+pub enum NotificationError {
+    Common(Error),
+    Lagged,
+    ResourceLimit(&'static str),
+}
+
+pub type NotificationResult<T> =
+    std::result::Result<T, NotificationError>;
+
 pub struct ServiceNotificationClient {
     // Private owned connection, session state, and notification receiver.
 }
@@ -117,17 +126,17 @@ impl ServiceNotificationClient {
     pub async fn connect_clear(
         endpoint: SocketAddr,
         timeout: Duration,
-    ) -> Result<Self>;
+    ) -> NotificationResult<Self>;
 
     pub async fn register_filter(
         &self,
         filter: &ServiceNotificationFilter,
         timeout: Option<Duration>,
-    ) -> Result<ServiceNotificationRegistration>;
+    ) -> NotificationResult<ServiceNotificationRegistration>;
 
-    pub async fn recv(&mut self) -> Option<Result<ServiceNotification>>;
+    pub async fn recv(&mut self) -> Option<NotificationResult<ServiceNotification>>;
 
-    pub async fn close(self, timeout: Option<Duration>) -> Result<()>;
+    pub async fn close(self, timeout: Option<Duration>) -> NotificationResult<()>;
 }
 
 pub struct ServiceNotificationFilter {
@@ -142,7 +151,7 @@ pub struct ServiceNotificationRegistration {
 }
 
 impl ServiceNotificationRegistration {
-    pub async fn unregister(self, timeout: Option<Duration>) -> Result<()>;
+    pub async fn unregister(self, timeout: Option<Duration>) -> NotificationResult<()>;
 }
 
 pub struct ServiceNotification {
@@ -153,6 +162,14 @@ pub struct ServiceNotification {
     pub version: ServiceEndpointVersion,
 }
 ```
+
+Notification-only failures belong to this API family, not the shared transport
+`Error` used by ordinary queries/resolution. Every fallible notification method
+uses `NotificationResult`; `Common` wraps the original shared error and preserves
+its source. Shared codec/control resource limits stay common, while notification
+delivery, filter, and bookkeeping limits use the scoped variants. Low-level
+callback adapters must preserve the original notification cause before retiring
+the connection; do not classify failures by matching diagnostic strings.
 
 `ServiceNotificationClient` is not cloneable and owns one connection, one native
 session, and one receiver. Multiple filters share that session and receiver;

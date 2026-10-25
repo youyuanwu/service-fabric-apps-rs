@@ -882,6 +882,12 @@ Retain the raw native numeric code and meaningful remote text, with operation,
 endpoint, phase, and activity context. Do not convert every failure into a
 timeout, `false`, empty collection, or a generic I/O error.
 
+Scope notification-only failures to `NotificationError`/`NotificationResult`
+on the standalone notification client and registration guards. Shared errors
+remain wrapped in `NotificationError::Common`; delivery lag and notification
+filter/bookkeeping limits do not become impossible cases in ordinary query
+results or transport errors.
+
 Validate expected success envelopes and decode each operation's status even
 when framing and correlation succeeded. A transport fault is not always a
 `ClientOperationFailure`, and that envelope is not a FabricTransport service

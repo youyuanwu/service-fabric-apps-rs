@@ -266,19 +266,19 @@ async fn thirty_two_filter_slots_include_pending_cleanup() {
     }
     assert!(matches!(
         client.register_filter(&filter(), None).await,
-        Err(Error::ResourceLimit(_))
+        Err(NotificationError::ResourceLimit(_))
     ));
     drop(guards.pop());
     cleanup_started.await.unwrap();
     assert!(matches!(
         client.register_filter(&filter(), None).await,
-        Err(Error::ResourceLimit(_))
+        Err(NotificationError::ResourceLimit(_))
     ));
     allow.send(()).unwrap();
     let guard = tokio::time::timeout(WAIT, async {
         loop {
             match client.register_filter(&filter(), None).await {
-                Err(Error::ResourceLimit(_)) => tokio::task::yield_now().await,
+                Err(NotificationError::ResourceLimit(_)) => tokio::task::yield_now().await,
                 result => break result.unwrap(),
             }
         }
@@ -316,7 +316,7 @@ async fn failed_or_cancelled_construction_closes_candidate_socket() {
         } else {
             assert!(matches!(
                 ServiceNotificationClient::connect_clear(addr, Duration::from_millis(100)).await,
-                Err(Error::Timeout)
+                Err(NotificationError::Common(Error::Timeout))
             ));
         }
         task.await.unwrap();
@@ -473,7 +473,10 @@ async fn early_update_retry_explicit_and_drop_cleanup_and_surviving_guard_close(
     cleanup_done.await.unwrap();
     let three = client.register_filter(&filter(), None).await.unwrap();
     client.close(None).await.unwrap();
-    assert!(matches!(three.unregister(None).await, Err(Error::Closed)));
+    assert!(matches!(
+        three.unregister(None).await,
+        Err(NotificationError::Common(Error::Closed))
+    ));
     task.await.unwrap();
 }
 
@@ -504,7 +507,7 @@ async fn full_delivery_reports_terminal_once_and_does_not_ack_lost_page_success(
     task.await.unwrap();
     assert!(matches!(
         client.recv().await,
-        Some(Err(Error::NotificationLag))
+        Some(Err(NotificationError::Lagged))
     ));
     assert!(client.recv().await.is_none());
 }
@@ -565,7 +568,10 @@ async fn cleanup_timeout_is_terminal_and_owner_drop_closes_with_guards_alive() {
                 .unregister(Some(Duration::from_millis(10)))
                 .await
                 .is_err());
-            assert!(matches!(client.recv().await, Some(Err(Error::Timeout))));
+            assert!(matches!(
+                client.recv().await,
+                Some(Err(NotificationError::Common(Error::Timeout)))
+            ));
             assert!(client.recv().await.is_none());
         } else {
             drop(client);

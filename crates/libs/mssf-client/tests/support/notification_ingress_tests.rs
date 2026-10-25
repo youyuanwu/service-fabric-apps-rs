@@ -84,9 +84,12 @@ async fn close_timeout_still_stops_socket_and_invalidates_surviving_guard() {
     let guard = client.register_filter(&filter(), None).await.unwrap();
     assert!(matches!(
         client.close(Some(Duration::from_millis(20))).await,
-        Err(Error::Timeout)
+        Err(NotificationError::Common(Error::Timeout))
     ));
-    assert!(matches!(guard.unregister(None).await, Err(Error::Closed)));
+    assert!(matches!(
+        guard.unregister(None).await,
+        Err(NotificationError::Common(Error::Closed))
+    ));
     task.await.unwrap();
 }
 
@@ -148,7 +151,7 @@ async fn definitive_registration_error_is_not_unknown_and_all_filter_flags_are_p
         .unwrap();
     assert!(matches!(
         client.register_filter(&filter(), None).await,
-        Err(Error::Remote { .. })
+        Err(NotificationError::Common(Error::Remote { .. }))
     ));
     for bits in 0..4 {
         let mut f = filter();
@@ -186,7 +189,30 @@ async fn thirty_three_pages_during_connection_overflow_bounded_ingress() {
     });
     assert!(matches!(
         ServiceNotificationClient::connect_clear(address, WAIT).await,
-        Err(Error::ResourceLimit(_))
+        Err(NotificationError::ResourceLimit(_))
+    ));
+    task.await.unwrap();
+}
+
+#[tokio::test]
+async fn constructor_preserves_notification_ingress_lag_before_session_reply() {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let task = tokio::spawn(async move {
+        let mut stream = peer::accept(listener).await;
+        read_message(&mut stream).await.unwrap();
+        let endpoints = vec!["x".repeat(32768); 32];
+        for index in 1..=8 {
+            let notification = page_with_endpoints(index, index as i64, 1, &endpoints);
+            if write_message(&mut stream, &notification).await.is_err() {
+                break;
+            }
+        }
+        assert!(read_message(&mut stream).await.is_err());
+    });
+    assert!(matches!(
+        ServiceNotificationClient::connect_clear(address, Duration::from_secs(10)).await,
+        Err(NotificationError::Lagged)
     ));
     task.await.unwrap();
 }
@@ -219,7 +245,7 @@ async fn decoded_storage_overflow_sends_failure_ack_and_terminates_without_deliv
     let _registration = client.register_filter(&filter(), None).await.unwrap();
     assert!(matches!(
         client.recv().await,
-        Some(Err(Error::NotificationLag))
+        Some(Err(NotificationError::Lagged))
     ));
     assert!(client.recv().await.is_none());
     task.await.unwrap();

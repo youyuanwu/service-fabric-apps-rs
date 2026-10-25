@@ -1,6 +1,7 @@
 //! Independent clear-TCP native notification sessions with owning filter guards.
 use std::{
     collections::HashMap,
+    fmt,
     net::SocketAddr,
     sync::{Arc, Mutex, Weak},
     time::Duration,
@@ -29,6 +30,53 @@ use crate::{
 #[cfg(test)]
 #[path = "notification_session_tests.rs"]
 mod tests;
+
+/// Failures scoped to notification clients and their registration guards.
+#[derive(Debug, Clone)]
+pub enum NotificationError {
+    /// A shared transport, protocol, timeout, input, or native operation failure.
+    Common(Error),
+    /// Delivery cannot maintain notification continuity within its bounds.
+    Lagged,
+    /// A notification filter, bookkeeping, or command resource was exhausted.
+    ResourceLimit(&'static str),
+}
+
+impl fmt::Display for NotificationError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Common(error) => write!(f, "{error}"),
+            Self::Lagged => f.write_str("notification delivery capacity exceeded"),
+            Self::ResourceLimit(resource) => {
+                write!(f, "notification resource limit: {resource}")
+            }
+        }
+    }
+}
+
+impl std::error::Error for NotificationError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::Common(error) => Some(error),
+            Self::Lagged | Self::ResourceLimit(_) => None,
+        }
+    }
+}
+
+impl From<Error> for NotificationError {
+    fn from(error: Error) -> Self {
+        Self::Common(error)
+    }
+}
+
+/// Result for notification construction, registration, delivery, and shutdown.
+///
+/// ```
+/// use mssf_client::{Error, NotificationError, NotificationResult};
+/// let result: NotificationResult<()> = Err(Error::Timeout.into());
+/// assert!(matches!(result, Err(NotificationError::Common(Error::Timeout))));
+/// ```
+pub type NotificationResult<T> = std::result::Result<T, NotificationError>;
 
 #[derive(Debug, Clone)]
 pub struct ServiceNotificationFilter {
@@ -62,7 +110,7 @@ struct Registrations {
 struct Cleanup {
     id: u64,
     deadline: Instant,
-    complete: Option<oneshot::Sender<Result<()>>>,
+    complete: Option<oneshot::Sender<NotificationResult<()>>>,
 }
 struct Incoming {
     body: Vec<u8>,
@@ -79,7 +127,7 @@ struct Session {
     wake: Notify,
 }
 impl Session {
-    fn fail(&self, error: Error) {
+    fn fail(&self, error: impl Into<NotificationError>) {
         {
             let mut state = self.state.lock().unwrap();
             if state.closed {
@@ -88,7 +136,7 @@ impl Session {
             state.closed = true;
             state.filters.clear();
         }
-        self.receiver.fail(error);
+        self.receiver.fail(error.into());
         self.connection.abort();
         self.wake.notify_one();
     }
@@ -106,17 +154,17 @@ impl Session {
         &self,
         id: u64,
         deadline: Instant,
-        complete: Option<oneshot::Sender<Result<()>>>,
-    ) -> Result<()> {
+        complete: Option<oneshot::Sender<NotificationResult<()>>>,
+    ) -> NotificationResult<()> {
         let mut state = self.state.lock().unwrap();
         if state.closed || state.closing {
-            return Err(Error::Closed);
+            return Err(Error::Closed.into());
         }
         let Some(registration) = state.filters.get_mut(&id) else {
-            return Err(Error::Closed);
+            return Err(Error::Closed.into());
         };
         if *registration != RegistrationState::Active {
-            return Err(Error::Closed);
+            return Err(Error::Closed.into());
         }
         *registration = RegistrationState::Cleanup;
         let result = self.cleanup.try_send(Cleanup {
@@ -126,7 +174,7 @@ impl Session {
         });
         drop(state);
         if result.is_err() {
-            let error = Error::ResourceLimit("automatic filter cleanup");
+            let error = NotificationError::ResourceLimit("automatic filter cleanup");
             self.fail(error.clone());
             return Err(error);
         }
@@ -143,10 +191,10 @@ impl Session {
         // Closed/closing means owner shutdown already owns all cleanup.
         let _ = self.enqueue(id, deadline, None);
     }
-    fn begin_close(&self, deadline: Instant) -> Result<()> {
+    fn begin_close(&self, deadline: Instant) -> NotificationResult<()> {
         let mut state = self.state.lock().unwrap();
         if state.closed {
-            return Err(self.receiver.error().unwrap_or(Error::Closed));
+            return Err(self.receiver.common_error(Error::Closed));
         }
         state.closing = true;
         let active: Vec<_> = state
@@ -167,7 +215,7 @@ impl Session {
                 .is_err()
             {
                 drop(state);
-                let error = Error::ResourceLimit("close cleanup admission");
+                let error = NotificationError::ResourceLimit("close cleanup admission");
                 self.fail(error.clone());
                 return Err(error);
             }
@@ -195,7 +243,10 @@ pub struct ServiceNotificationClient {
 impl ServiceNotificationClient {
     /// Establish an independent unsecured development connection and native session.
     /// No advertised private gateway address is dialed.
-    pub async fn connect_clear(endpoint: SocketAddr, timeout: Duration) -> Result<Self> {
+    pub async fn connect_clear(
+        endpoint: SocketAddr,
+        timeout: Duration,
+    ) -> NotificationResult<Self> {
         let deadline = deadline_after(timeout)?;
         let receiver = Arc::new(Receiver::default());
         let (pages, incoming) = mpsc::channel(MAX_PAGES);
@@ -204,22 +255,34 @@ impl ServiceNotificationClient {
             let receiver = weak_receiver.upgrade().ok_or(Error::Closed)?;
             // Queued input is charged now; shared Serde reserves owned storage
             // before allocation when the worker decodes the page.
-            let bytes = request.message.body.capacity() + std::mem::size_of::<Incoming>();
-            let memory = receiver.budget.reserve(bytes)?;
-            pages
-                .try_send(Incoming {
-                    body: request.message.body,
-                    context: request.context,
-                    memory,
-                })
-                .map_err(|error| match error {
-                    mpsc::error::TrySendError::Full(_) => {
-                        Error::ResourceLimit("notification page queue")
-                    }
-                    mpsc::error::TrySendError::Closed(_) => Error::Closed,
-                })
+            let result = (|| -> NotificationResult<()> {
+                let bytes = request.message.body.capacity() + std::mem::size_of::<Incoming>();
+                let memory = receiver.budget.reserve(bytes)?;
+                pages
+                    .try_send(Incoming {
+                        body: request.message.body,
+                        context: request.context,
+                        memory,
+                    })
+                    .map_err(|error| match error {
+                        mpsc::error::TrySendError::Full(_) => {
+                            NotificationError::ResourceLimit("notification page queue")
+                        }
+                        mpsc::error::TrySendError::Closed(_) => Error::Closed.into(),
+                    })
+            })();
+            result.map_err(|error| {
+                // Preserve the domain cause before the generic driver retires.
+                receiver.fail(error.clone());
+                match error {
+                    NotificationError::Common(error) => error,
+                    _ => Error::ResourceLimit("reverse request ingress"),
+                }
+            })
         });
-        let connection = Connection::connect_duplex_clear(endpoint, deadline, handler).await?;
+        let connection = Connection::connect_duplex_clear(endpoint, deadline, handler)
+            .await
+            .map_err(|error| receiver.common_error(error))?;
         let mut candidate = Candidate {
             connection: connection.clone(),
             armed: true,
@@ -241,7 +304,11 @@ impl ServiceNotificationClient {
             wire::decode_connected,
             SendStatus::default(),
         )
-        .await?;
+        .await
+        .map_err(|error| receiver.common_error(error))?;
+        if let Some(error) = receiver.error() {
+            return Err(error);
+        }
         // A fresh session has no retained partitions to check against the delete
         // watermark. No reconnect/deletion synchronization is implied.
         let gateway = connected.description();
@@ -288,21 +355,21 @@ impl ServiceNotificationClient {
         &self,
         filter: &ServiceNotificationFilter,
         timeout: Option<Duration>,
-    ) -> Result<ServiceNotificationRegistration> {
+    ) -> NotificationResult<ServiceNotificationRegistration> {
         let deadline = deadline_after(timeout.unwrap_or(self.session.timeout))?;
         let id = {
             let mut state = self.session.state.lock().unwrap();
             if state.closed || state.closing {
-                return Err(self.session.receiver.error().unwrap_or(Error::Closed));
+                return Err(self.session.receiver.common_error(Error::Closed));
             }
             if state.filters.len() == MAX_FILTERS {
-                return Err(Error::ResourceLimit("notification filters"));
+                return Err(NotificationError::ResourceLimit("notification filters"));
             }
             let id = state.next;
             state.next = state
                 .next
                 .checked_add(1)
-                .ok_or(Error::ResourceLimit("filter IDs"))?;
+                .ok_or(NotificationError::ResourceLimit("filter IDs"))?;
             state.filters.insert(id, RegistrationState::Registering);
             id
         };
@@ -336,7 +403,7 @@ impl ServiceNotificationClient {
             Ok(()) => {
                 let mut state = self.session.state.lock().unwrap();
                 if state.closed || state.closing {
-                    return Err(self.session.receiver.error().unwrap_or(Error::Closed));
+                    return Err(self.session.receiver.common_error(Error::Closed));
                 }
                 state.filters.insert(id, RegistrationState::Active);
                 mutation.armed = false;
@@ -351,14 +418,14 @@ impl ServiceNotificationClient {
                     mutation.armed = false;
                     self.session.state.lock().unwrap().filters.remove(&id);
                 }
-                Err(error)
+                Err(self.session.receiver.common_error(error))
             }
         }
     }
 
     /// Local receive: cancellation never consumes an event or unregisters filters.
     /// On failure returns one terminal error, then None, even if the queue was full.
-    pub async fn recv(&mut self) -> Option<Result<ServiceNotification>> {
+    pub async fn recv(&mut self) -> Option<NotificationResult<ServiceNotification>> {
         // A known transport failure takes priority over buffered updates even
         // when the worker has not yet been scheduled to observe driver exit.
         if let Some(error) = self.session.connection.terminal_error() {
@@ -369,13 +436,13 @@ impl ServiceNotificationClient {
 
     /// Stop mutations, deregister under one deadline, and await owned task/socket exit.
     /// Socket shutdown still proceeds if cleanup fails or times out.
-    pub async fn close(mut self, timeout: Option<Duration>) -> Result<()> {
+    pub async fn close(mut self, timeout: Option<Duration>) -> NotificationResult<()> {
         let deadline = match deadline_after(timeout.unwrap_or(self.session.timeout)) {
             Ok(deadline) => deadline,
             Err(error) => {
                 self.session.fail(error.clone());
                 self.join().await;
-                return Err(error);
+                return Err(error.into());
             }
         };
         let mut result = self.session.begin_close(deadline);
@@ -385,16 +452,20 @@ impl ServiceNotificationClient {
                 Ok(Err(_)) => {
                     self.session
                         .fail(Error::Protocol("notification worker failed"));
-                    result = Err(Error::Protocol("notification worker failed"));
+                    result = Err(Error::Protocol("notification worker failed").into());
                 }
                 Err(_) => {
                     self.session.fail(Error::Timeout);
                     let _ = worker.await;
-                    result = Err(Error::Timeout);
+                    result = Err(Error::Timeout.into());
                 }
             }
         }
-        self.session.connection.close().await?;
+        self.session
+            .connection
+            .close()
+            .await
+            .map_err(|error| self.session.receiver.common_error(error))?;
         if let Some(error) = self.session.receiver.error() {
             return Err(error);
         }
@@ -427,7 +498,7 @@ pub struct ServiceNotificationRegistration {
 }
 impl ServiceNotificationRegistration {
     /// Consume the guard and await confirmation, without a second destructor cleanup.
-    pub async fn unregister(mut self, timeout: Option<Duration>) -> Result<()> {
+    pub async fn unregister(mut self, timeout: Option<Duration>) -> NotificationResult<()> {
         let session = self.session.upgrade().ok_or(Error::Closed)?;
         let deadline = deadline_after(timeout.unwrap_or(session.timeout))?;
         let (sender, receiver) = oneshot::channel();
@@ -435,8 +506,8 @@ impl ServiceNotificationRegistration {
         self.armed = false;
         timeout_at(deadline, receiver)
             .await
-            .map_err(|_| Error::Timeout)?
-            .map_err(|_| session.receiver.error().unwrap_or(Error::Closed))?
+            .map_err(|_| session.receiver.common_error(Error::Timeout))?
+            .map_err(|_| session.receiver.common_error(Error::Closed))?
     }
 }
 impl Drop for ServiceNotificationRegistration {
@@ -537,10 +608,10 @@ async fn run(
             cleanup = cleanups.recv() => {
                 let Some(cleanup)=cleanup else { session.fail(Error::Closed); break; };
                 let body=to_vec(&wire::Unregister {client:&session.id,id:cleanup.id});
-                let result=match body {
+                let result=(match body {
                     Ok(body)=>request(&session.connection,"UnregisterServiceNotificationFilterRequest",body,cleanup.deadline,wire::decode_unregistered,SendStatus::default()).await,
                     Err(error)=>Err(error),
-                };
+                }).map_err(|error|session.receiver.common_error(error));
                 if result.is_ok() { session.state.lock().unwrap().filters.remove(&cleanup.id); }
                 if let Some(complete)=cleanup.complete { let _=complete.send(result.clone()); }
                 if let Err(error)=result { session.fail(error); break; }
@@ -552,10 +623,11 @@ async fn run(
                 // an ACK wait must not retain unaccounted raw page storage.
                 drop(incoming.body);
                 let result=decoded.and_then(|page|progress.commit(page,incoming.memory,&session.receiver));
+                if let Err(error)=&result { session.receiver.fail(error.clone()); }
                 let ack=match (wire::status(result.is_ok()),deadline_after(session.timeout)) {
                     (Ok(body),Ok(deadline))=>incoming.context.reply(body,deadline).await,
                     (Err(error),_)|(_,Err(error))=>Err(error),
-                };
+                }.map_err(|error|session.receiver.common_error(error));
                 if let Err(error)=result.and(ack) { session.fail(error); break; }
             }
         }

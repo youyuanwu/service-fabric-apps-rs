@@ -5,6 +5,89 @@ use mssf_transport::{
 };
 use tokio::net::TcpListener;
 
+#[test]
+fn scoped_errors_preserve_common_sources_cloning_and_domain_diagnostics() {
+    fn send_sync<T: Send + Sync>() {}
+    send_sync::<NotificationError>();
+    for error in [
+        Error::Timeout,
+        Error::Remote {
+            code: -7,
+            message: "native failure".into(),
+        },
+        Error::ResourceLimit("shared decoder"),
+        Error::Io(std::io::Error::new(
+            std::io::ErrorKind::ConnectionReset,
+            "peer reset",
+        )),
+    ] {
+        let display = error.to_string();
+        let scoped = NotificationError::from(error).clone();
+        assert_eq!(scoped.to_string(), display);
+        let source = std::error::Error::source(&scoped)
+            .unwrap()
+            .downcast_ref::<Error>()
+            .unwrap();
+        match source {
+            Error::Remote { code, message } => {
+                assert_eq!(*code, -7);
+                assert_eq!(message, "native failure");
+            }
+            Error::Io(error) => assert_eq!(error.kind(), std::io::ErrorKind::ConnectionReset),
+            Error::ResourceLimit(resource) => assert_eq!(*resource, "shared decoder"),
+            Error::Timeout => {}
+            _ => panic!("unexpected common error"),
+        }
+    }
+    for error in [
+        NotificationError::Lagged,
+        NotificationError::ResourceLimit("notification filters"),
+    ] {
+        let cloned = error.clone();
+        assert!(std::error::Error::source(&cloned).is_none());
+        assert!(cloned.to_string().starts_with("notification "));
+    }
+}
+
+#[tokio::test]
+async fn notification_terminal_cause_is_not_replaced_by_generic_connection_shutdown() {
+    let (session, _cleanups, _peer) = session().await;
+    session.receiver.fail(NotificationError::Lagged);
+    session.connection.abort();
+    let mut client = ServiceNotificationClient {
+        session: session.clone(),
+        worker: None,
+        gateway: GatewayDescription {
+            address: String::new(),
+            node_id: 0,
+            node_instance: 0,
+            node_name: "test".into(),
+        },
+    };
+    assert!(matches!(
+        client.recv().await,
+        Some(Err(NotificationError::Lagged))
+    ));
+    assert!(client.recv().await.is_none());
+    assert!(matches!(
+        client
+            .register_filter(
+                &ServiceNotificationFilter {
+                    name: "fabric:/App/Service".parse().unwrap(),
+                    name_prefix: false,
+                    primary_only: false,
+                },
+                None
+            )
+            .await,
+        Err(NotificationError::Lagged)
+    ));
+    assert!(matches!(
+        client.close(None).await,
+        Err(NotificationError::Lagged)
+    ));
+}
+
 #[tokio::test]
 async fn known_driver_failure_precedes_buffered_updates_without_worker_progress() {
     use crate::resolution_protocol::{Cuid, ReplicaSet, TableEntry};
@@ -53,7 +136,10 @@ async fn known_driver_failure_precedes_buffered_updates_without_worker_progress(
         },
     };
     session.connection.abort();
-    assert!(matches!(client.recv().await, Some(Err(Error::Closed))));
+    assert!(matches!(
+        client.recv().await,
+        Some(Err(NotificationError::Common(Error::Closed)))
+    ));
     assert!(client.recv().await.is_none());
     session.connection.close().await.unwrap();
 }
@@ -125,7 +211,7 @@ async fn full_cleanup_command_path_is_terminal_without_another_queue_write() {
     assert!(session.connection.is_closed());
     assert!(matches!(
         session.receiver.recv().await,
-        Some(Err(Error::ResourceLimit(_)))
+        Some(Err(NotificationError::ResourceLimit(_)))
     ));
     assert!(session.receiver.recv().await.is_none());
     session.connection.close().await.unwrap();
@@ -171,7 +257,7 @@ async fn aborted_unpolled_worker_publishes_terminal_and_stale_guards_cannot_reop
     let _ = task.await;
     assert!(matches!(
         session.receiver.recv().await,
-        Some(Err(Error::Protocol(_)))
+        Some(Err(NotificationError::Common(Error::Protocol(_))))
     ));
     assert!(session.receiver.recv().await.is_none());
     let old = ServiceNotificationRegistration {
@@ -179,7 +265,10 @@ async fn aborted_unpolled_worker_publishes_terminal_and_stale_guards_cannot_reop
         id: 1,
         armed: true,
     };
-    assert!(matches!(old.unregister(None).await, Err(Error::Closed)));
+    assert!(matches!(
+        old.unregister(None).await,
+        Err(NotificationError::Common(Error::Closed))
+    ));
     session.connection.close().await.unwrap();
 }
 

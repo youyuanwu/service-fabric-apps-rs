@@ -27,7 +27,7 @@ fn prospective_rehash_and_range_copy_peaks_are_reserved_before_clone() {
         .unwrap();
     assert!(matches!(
         progress.commit(page(0, &[(6000, 16000)], &[]), memory, &receiver),
-        Err(Error::NotificationLag)
+        Err(NotificationError::Lagged)
     ));
     assert_eq!(progress.partitions.len(), 3500);
     assert_eq!(progress.ranges.len(), 4000);
@@ -84,7 +84,7 @@ fn page(generation: i64, entries: &[(u128, i64)], ranges: &[(i64, i64)]) -> Page
         ),
     }
 }
-fn commit(progress: &mut Progress, receiver: &Receiver, page: Page) -> Result<()> {
+fn commit(progress: &mut Progress, receiver: &Receiver, page: Page) -> NotificationResult<()> {
     let memory = receiver.budget.reserve(1024 * 1024)?;
     progress.commit(page, memory, receiver)
 }
@@ -117,14 +117,14 @@ async fn whole_page_overflow_rolls_back_and_terminal_bypasses_full_delivery() {
             &receiver,
             page(1, &[(999, 999), (1000, 1000)], &[(999, 1001)])
         ),
-        Err(Error::NotificationLag)
+        Err(NotificationError::Lagged)
     ));
     assert_eq!(progress.partitions.len(), 256);
     assert!(progress.ranges.is_empty());
-    receiver.fail(Error::NotificationLag);
+    receiver.fail(NotificationError::Lagged);
     assert!(matches!(
         receiver.recv().await,
-        Some(Err(Error::NotificationLag))
+        Some(Err(NotificationError::Lagged))
     ));
     assert!(receiver.recv().await.is_none());
     assert_eq!(
@@ -142,7 +142,7 @@ fn bookkeeping_limits_do_not_evict_or_advance_on_failure() {
     };
     assert!(matches!(
         commit(&mut progress, &receiver, page(0, &[(5000, 5)], &[])),
-        Err(Error::ResourceLimit(_))
+        Err(NotificationError::ResourceLimit(_))
     ));
     assert_eq!(progress.partitions.len(), MAX_IDENTITIES);
     progress.partitions.clear();
@@ -154,7 +154,7 @@ fn bookkeeping_limits_do_not_evict_or_advance_on_failure() {
         .collect();
     assert!(matches!(
         commit(&mut progress, &receiver, page(0, &[], &[(15000, 15001)])),
-        Err(Error::ResourceLimit(_))
+        Err(NotificationError::ResourceLimit(_))
     ));
     assert_eq!(progress.ranges.len(), MAX_INTERVALS);
     assert!(receiver.inner.lock().unwrap().queue.is_empty());
@@ -164,7 +164,7 @@ fn bookkeeping_limits_do_not_evict_or_advance_on_failure() {
 fn memory_budget_is_shared_and_released_on_every_path() {
     let budget = Arc::new(Budget::default());
     let memory = budget.reserve(MAX_MEMORY).unwrap();
-    assert!(matches!(budget.reserve(1), Err(Error::NotificationLag)));
+    assert!(matches!(budget.reserve(1), Err(NotificationError::Lagged)));
     drop(memory);
     assert_eq!(*budget.0.lock().unwrap(), 0);
     let receiver = Receiver::default();
@@ -189,7 +189,7 @@ fn reservation_growth_is_atomic_shared_and_released() {
     let budget = Arc::new(Budget::default());
     let mut memory = budget.reserve(MAX_MEMORY - 1).unwrap();
     let occupied = budget.reserve(1).unwrap();
-    assert!(matches!(memory.grow(1), Err(Error::NotificationLag)));
+    assert!(matches!(memory.grow(1), Err(NotificationError::Lagged)));
     assert_eq!(memory.bytes, MAX_MEMORY - 1);
     assert_eq!(*budget.0.lock().unwrap(), MAX_MEMORY);
     drop(occupied);
@@ -197,7 +197,7 @@ fn reservation_growth_is_atomic_shared_and_released() {
     assert_eq!(memory.bytes, MAX_MEMORY);
     assert!(matches!(
         memory.grow(usize::MAX),
-        Err(Error::NotificationLag)
+        Err(NotificationError::Lagged)
     ));
     drop(memory);
     assert_eq!(*budget.0.lock().unwrap(), 0);
@@ -245,7 +245,7 @@ async fn derived_page_decoding_and_conversion_share_preallocation_budget() {
     assert_eq!(*receiver.budget.0.lock().unwrap(), MAX_MEMORY);
     assert!(matches!(
         progress.commit(decoded, memory, &receiver),
-        Err(Error::NotificationLag)
+        Err(NotificationError::Lagged)
     ));
     assert!(progress.partitions.is_empty());
     assert!(progress.ranges.is_empty());
@@ -260,7 +260,7 @@ async fn derived_page_decoding_and_conversion_share_preallocation_budget() {
         .unwrap();
     assert!(matches!(
         crate::notification_protocol::decode_page(&body, &mut |bytes| memory.grow(bytes)),
-        Err(Error::NotificationLag)
+        Err(NotificationError::Lagged)
     ));
     drop(memory);
     assert_eq!(*receiver.budget.0.lock().unwrap(), fixed + occupied.bytes);
@@ -278,6 +278,32 @@ async fn derived_page_decoding_and_conversion_share_preallocation_budget() {
         .iter()
         .all(|endpoint| endpoint.address == address));
     assert_eq!(*receiver.budget.0.lock().unwrap(), fixed);
+}
+
+#[test]
+fn serde_quota_bridge_preserves_scoped_failures_without_relabeling_protocol_errors() {
+    let body = mssf_transport::serialization::serde::to_vec(&PageBody {
+        page: Pointer(Some(page(1, &[(1, 1)], &[]))),
+    })
+    .unwrap();
+    assert!(matches!(
+        crate::notification_protocol::decode_page(&body, &mut |_| {
+            Err(NotificationError::ResourceLimit(
+                "injected allocation budget",
+            ))
+        }),
+        Err(NotificationError::ResourceLimit(
+            "injected allocation budget"
+        ))
+    ));
+    assert!(matches!(
+        crate::notification_protocol::decode_page(&body, &mut |_| { Err(Error::Timeout.into()) }),
+        Err(NotificationError::Common(Error::Timeout))
+    ));
+    assert!(matches!(
+        crate::notification_protocol::decode_page(&[0], &mut |_| Ok(())),
+        Err(NotificationError::Common(Error::Protocol(_)))
+    ));
 }
 
 #[tokio::test]

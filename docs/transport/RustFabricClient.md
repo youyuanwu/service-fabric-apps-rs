@@ -846,7 +846,7 @@ use mssf_client::{
     ServiceNotificationFilter, DEFAULT_TIMEOUT,
 };
 
-# async fn example() -> mssf_client::Result<()> {
+# async fn example() -> mssf_client::NotificationResult<()> {
 let endpoint = "127.0.0.1:19000".parse().unwrap();
 let ordinary = FabricClient::connect_clear(endpoint, DEFAULT_TIMEOUT).await?;
 let mut changes =
@@ -898,6 +898,17 @@ Unconfirmed filter mutations/cleanup retire only this notification session.
 Explicit close attempts deregistration under one deadline and awaits task/socket
 stop even on cleanup failure. Owner drop initiates shutdown; remote disconnect
 cleanup is eventual, not an immediate deregistration guarantee.
+
+Notification construction, registration, receive, unregister, and close return
+`NotificationResult<T>`, whose error is `NotificationError`. Delivery-budget
+exhaustion is `NotificationError::Lagged`; notification filter/bookkeeping/queue
+limits are `NotificationError::ResourceLimit`. Shared transport, protocol,
+timeout, input, and native faults are retained as `NotificationError::Common(Error)`,
+including genuinely shared decoder/control resource limits. The ordinary
+`FabricClient` keeps its existing `Result<T>` and has no notification-only error cases.
+This changes notification method error types, not the native payload or wire
+format. Match `NotificationError::Common(Error::Timeout)` for a notification
+timeout instead of matching `Error::Timeout` directly.
 
 There is no endpoint cache, hidden description query, reconnect, filter replay,
 or snapshot. The gateway can still use its own cache: independent management
@@ -978,7 +989,7 @@ existing transport I/O limits and separately bounded protocol state still apply.
 A page must fit as one transaction. Delivery lag and protocol-bookkeeping/
 cleanup resource failures are terminal; status does not need a queue slot.
 Local filter-admission exhaustion is instead rejected before sending without
-retiring the healthy session (`ResourceLimit("notification filters")`).
+retiring the healthy session (`NotificationError::ResourceLimit("notification filters")`).
 Unsupported trailing metadata, no-copy extensions, or object flags fail
 explicitly. General native forward compatibility is not claimed.
 

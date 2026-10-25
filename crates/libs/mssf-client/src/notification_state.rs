@@ -9,7 +9,7 @@ use uuid::Uuid;
 use crate::{
     notification_protocol::{Interval, Page},
     resolution::Generation,
-    Error, Result, ServiceNotification,
+    Error, NotificationError, NotificationResult, ServiceNotification,
 };
 
 pub(crate) const MAX_EVENTS: usize = 256;
@@ -31,15 +31,15 @@ pub(crate) struct Memory {
     bytes: usize,
 }
 impl Budget {
-    fn charge(&self, bytes: usize) -> Result<()> {
+    fn charge(&self, bytes: usize) -> NotificationResult<()> {
         let mut used = self.0.lock().unwrap();
         if bytes > MAX_MEMORY.saturating_sub(*used) {
-            return Err(Error::NotificationLag);
+            return Err(NotificationError::Lagged);
         }
         *used += bytes;
         Ok(())
     }
-    pub fn reserve(self: &Arc<Self>, bytes: usize) -> Result<Memory> {
+    pub fn reserve(self: &Arc<Self>, bytes: usize) -> NotificationResult<Memory> {
         self.charge(bytes)?;
         Ok(Memory {
             budget: self.clone(),
@@ -48,14 +48,16 @@ impl Budget {
     }
 }
 impl Memory {
-    pub fn grow(&mut self, bytes: usize) -> Result<()> {
+    pub fn grow(&mut self, bytes: usize) -> NotificationResult<()> {
         self.budget.charge(bytes)?;
         self.bytes += bytes;
         Ok(())
     }
-    fn split(&mut self, bytes: usize) -> Result<Self> {
+    fn split(&mut self, bytes: usize) -> NotificationResult<Self> {
         if bytes > self.bytes {
-            return Err(Error::ResourceLimit("decoded notification accounting"));
+            return Err(NotificationError::ResourceLimit(
+                "decoded notification accounting",
+            ));
         }
         self.bytes -= bytes;
         Ok(Self {
@@ -73,7 +75,7 @@ impl Drop for Memory {
 #[derive(Default)]
 struct Delivery {
     queue: VecDeque<(ServiceNotification, Memory)>,
-    terminal: Option<Error>,
+    terminal: Option<NotificationError>,
     emitted: bool,
     closed: bool,
 }
@@ -103,7 +105,7 @@ impl Default for Receiver {
     }
 }
 impl Receiver {
-    pub fn fail(&self, error: Error) {
+    pub fn fail(&self, error: NotificationError) {
         let mut inner = self.inner.lock().unwrap();
         if inner.closed {
             return;
@@ -121,10 +123,13 @@ impl Receiver {
         drop(inner);
         self.changed.notify_one();
     }
-    pub fn error(&self) -> Option<Error> {
+    pub fn error(&self) -> Option<NotificationError> {
         self.inner.lock().unwrap().terminal.clone()
     }
-    pub async fn recv(&self) -> Option<Result<ServiceNotification>> {
+    pub fn common_error(&self, error: Error) -> NotificationError {
+        self.error().unwrap_or(NotificationError::Common(error))
+    }
+    pub async fn recv(&self) -> Option<NotificationResult<ServiceNotification>> {
         loop {
             let changed = self.changed.notified();
             {
@@ -159,7 +164,12 @@ impl Progress {
         }
     }
     /// No delivery or progress becomes visible until the entire page fits.
-    pub fn commit(&mut self, page: Page, mut memory: Memory, receiver: &Receiver) -> Result<()> {
+    pub fn commit(
+        &mut self,
+        page: Page,
+        mut memory: Memory,
+        receiver: &Receiver,
+    ) -> NotificationResult<()> {
         if page.generation < self.generation {
             return Ok(());
         }
@@ -223,7 +233,9 @@ impl Progress {
             if !next.partitions.contains_key(&version.partition)
                 && next.partitions.len() == MAX_IDENTITIES
             {
-                return Err(Error::ResourceLimit("notification partition identities"));
+                return Err(NotificationError::ResourceLimit(
+                    "notification partition identities",
+                ));
             }
             next.partitions.insert(version.partition, lookup);
             let (kind, endpoints) = table.endpoints();
@@ -239,7 +251,7 @@ impl Progress {
             next.ranges.extend(versions.ranges.0);
         }
         if next.ranges.iter().any(|r| r.start < 0 || r.start >= r.end) {
-            return Err(Error::Protocol("invalid notification version range"));
+            return Err(Error::Protocol("invalid notification version range").into());
         }
         next.ranges.sort_unstable_by_key(|r| r.start);
         let mut merged: Vec<Interval> = Vec::new();
@@ -251,15 +263,20 @@ impl Progress {
             }
         }
         if merged.len() > MAX_INTERVALS {
-            return Err(Error::ResourceLimit("notification version intervals"));
+            return Err(NotificationError::ResourceLimit(
+                "notification version intervals",
+            ));
         }
         next.ranges = merged;
         let mut inner = receiver.inner.lock().unwrap();
         if inner.closed {
-            return Err(inner.terminal.clone().unwrap_or(Error::Closed));
+            return Err(inner
+                .terminal
+                .clone()
+                .unwrap_or(NotificationError::Common(Error::Closed)));
         }
         if updates.len() > MAX_EVENTS.saturating_sub(inner.queue.len()) {
-            return Err(Error::NotificationLag);
+            return Err(NotificationError::Lagged);
         }
         let mut admitted = Vec::with_capacity(updates.len());
         for event in updates {

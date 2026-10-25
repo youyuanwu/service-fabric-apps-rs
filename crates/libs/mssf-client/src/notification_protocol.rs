@@ -8,8 +8,8 @@ use mssf_transport::{
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    resolution::Generation, resolution_protocol::TableEntry, GatewayDescription, NamingUri, NodeId,
-    Result,
+    resolution::Generation, resolution_protocol::TableEntry, Error, GatewayDescription, NamingUri,
+    NodeId, NotificationResult, Result,
 };
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -130,12 +130,24 @@ pub(crate) struct PageBody {
 }
 pub(crate) fn decode_page(
     body: &[u8],
-    reserve: &mut impl FnMut(usize) -> Result<()>,
-) -> Result<Page> {
-    from_slice_with_budget::<PageBody>(body, reserve)?
+    reserve: &mut impl FnMut(usize) -> NotificationResult<()>,
+) -> NotificationResult<Page> {
+    // Serde's format error stays shared; retain the original reservation cause
+    // separately rather than interpreting a transport diagnostic string.
+    let mut allocation_error = None;
+    let decoded = from_slice_with_budget::<PageBody>(body, &mut |bytes| {
+        reserve(bytes).map_err(|error| {
+            allocation_error = Some(error);
+            Error::ResourceLimit("decoded allocation reservation")
+        })
+    });
+    if let Some(error) = allocation_error {
+        return Err(error);
+    }
+    decoded?
         .page
         .0
-        .ok_or(crate::Error::Protocol("null notification page"))
+        .ok_or_else(|| Error::Protocol("null notification page").into())
 }
 pub(crate) fn status(success: bool) -> Result<Vec<u8>> {
     #[derive(Serialize)]
