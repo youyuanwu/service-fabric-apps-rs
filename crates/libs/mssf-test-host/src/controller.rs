@@ -302,7 +302,23 @@ mod tests {
         let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
         let address = listener.local_addr().unwrap().to_string();
         assert!(stopped(&address).is_err());
-        drop(listener);
+        // Reserve a different port without listening. Dropping a listener and
+        // then probing its unowned port races reuse/inherited socket teardown.
+        let not_listening = socket2::Socket::new(
+            socket2::Domain::IPV4,
+            socket2::Type::STREAM,
+            Some(socket2::Protocol::TCP),
+        )
+        .unwrap();
+        not_listening
+            .bind(&"127.0.0.1:0".parse::<SocketAddr>().unwrap().into())
+            .unwrap();
+        let address = not_listening
+            .local_addr()
+            .unwrap()
+            .as_socket()
+            .unwrap()
+            .to_string();
         stopped(&address).unwrap();
     }
 }
