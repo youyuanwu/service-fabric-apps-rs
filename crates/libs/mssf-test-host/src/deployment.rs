@@ -1,6 +1,8 @@
 use crate::{wire, HostError, Result};
+use sha2::{Digest, Sha256};
 use std::{
     fs,
+    io::Read,
     path::{Path, PathBuf},
 };
 
@@ -28,6 +30,7 @@ impl Deployment {
             &application.join("log"),
             &application.join("temp"),
             &root.join("native-data"),
+            &root.join("native-objects"),
         ] {
             fs::create_dir_all(directory)?;
         }
@@ -60,7 +63,7 @@ impl Deployment {
         let config = root.join("FabricConfig.cfg");
         fs::write(
             &config,
-            "[Trace/Console]\nLevel=4\n[Trace/Etw]\nLevel=0\n[Trace/File]\nLevel=0\n",
+            format!("[Common]\nObjectFolder={}\n[Trace/Console]\nLevel=4\n[Trace/Etw]\nLevel=0\n[Trace/File]\nLevel=0\n", root.join("native-objects").display()),
         )?;
         Ok(Self {
             root,
@@ -84,9 +87,30 @@ pub fn preflight(runtime: &Path, app: &Path) -> Result<()> {
             "unsupported native runtime: require 11.8.121.4".into(),
         ));
     }
-    for name in ["libFabricRuntime.so", "libFabricCommon.so"] {
-        if !runtime.join(name).is_file() {
-            return Err(HostError(format!("missing native library {name}")));
+    for (name, expected) in [
+        (
+            "libFabricRuntime.so",
+            "9ce2cac38006b12c8a6b4ef5735f0ab9d8e9ab29f09a7a414e2dc5b329c5046f",
+        ),
+        (
+            "libFabricCommon.so",
+            "650ea380d8a892d9015c7159ed09c2b23935b3a0f529c7f3e4b6cf9a2a82414f",
+        ),
+    ] {
+        let mut file = fs::File::open(runtime.join(name))?;
+        let mut hasher = Sha256::new();
+        let mut block = [0; 65536];
+        loop {
+            let count = file.read(&mut block)?;
+            if count == 0 {
+                break;
+            }
+            hasher.update(&block[..count]);
+        }
+        if format!("{:x}", hasher.finalize()) != expected {
+            return Err(HostError(format!(
+                "unsupported native library hash: {name}"
+            )));
         }
     }
     if !app.is_file() {

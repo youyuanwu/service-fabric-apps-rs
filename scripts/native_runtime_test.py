@@ -58,7 +58,7 @@ def qualify_libraries(native):
 def main():
     repo = pathlib.Path(__file__).resolve().parent.parent
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("action", choices=["prepare", "bootstrap"])
+    parser.add_argument("action", choices=["prepare", "bootstrap", "close", "abort"])
     parser.add_argument("--root", type=pathlib.Path,
                         default=repo / "build/native-runtime-test-host")
     parser.add_argument("--native-directory", type=pathlib.Path)
@@ -88,7 +88,7 @@ def main():
                     "-p", "stateless-test-app"], cwd=repo, check=True, timeout=180)
     result = subprocess.run([
         str(repo / "target/debug/mssf-test-host"), str(native), str(dependencies),
-        str(repo / "target/debug/stateless-test-app"), str(root),
+        str(repo / "target/debug/stateless-test-app"), str(root), args.action,
     ], cwd=repo, timeout=140, check=False)
     return result.returncode
 

@@ -85,6 +85,18 @@ impl Session {
         Ok(())
     }
 
+    pub fn one_way(&mut self, actor: i64, action: &str, body: Vec<u8>) -> Result<()> {
+        let id = self.id();
+        self.send(Message {
+            headers: vec![
+                Header::message_id(id)?,
+                Header::actor(actor)?,
+                Header::action(action)?,
+            ],
+            body,
+        })
+    }
+
     pub fn reply(&mut self, request: MessageId, action: Option<&str>, body: Vec<u8>) -> Result<()> {
         if request == MessageId::default() {
             return Err(HostError("correlated request missing MessageId".into()));

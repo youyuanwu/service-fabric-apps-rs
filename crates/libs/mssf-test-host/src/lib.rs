@@ -1,8 +1,10 @@
 //! Experimental standalone node-side host for one trusted native stateless app.
 //! Native-free model tests do not establish native FabricRuntime compatibility.
 
+mod controller;
 mod deployment;
 mod ipc;
+mod lifecycle_wire;
 mod process;
 #[cfg(test)]
 mod tests;
@@ -55,6 +57,24 @@ pub struct Options {
     pub run_parent: PathBuf,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Scenario {
+    Bootstrap,
+    Close,
+    Abort,
+}
+
+#[derive(Debug, serde::Serialize)]
+pub struct RunReport {
+    pub scenario: Scenario,
+    pub pid: u32,
+    pub runtime_id: String,
+    pub endpoint: Option<String>,
+    pub callbacks: Vec<serde_json::Value>,
+    pub cleanup: serde_json::Value,
+}
+
 #[derive(Default)]
 struct Registration {
     started: bool,
@@ -71,6 +91,35 @@ fn require(condition: bool, description: &str) -> Result<()> {
     } else {
         Err(HostError(description.into()))
     }
+}
+
+fn validate_ipc(message: &Message, host: &str, pid: u32) -> Result<()> {
+    for id in [
+        mssf_transport::message::ACTOR,
+        mssf_transport::message::ACTION,
+        mssf_transport::message::MESSAGE_ID,
+        mssf_transport::message::RELATES_TO,
+        mssf_transport::message::EXPECTS_REPLY,
+    ] {
+        require(
+            message.headers.iter().filter(|h| h.id == id).count() <= 1,
+            "duplicate IPC routing header",
+        )?;
+    }
+    let identities: Vec<_> = message
+        .headers
+        .iter()
+        .filter(|h| h.id == wire::IPC_HEADER)
+        .collect();
+    require(
+        identities.len() == 1,
+        "IPC message must have one identity header",
+    )?;
+    let identity: wire::IpcIdentity = from_slice(&identities[0].value)?;
+    require(
+        identity.host == host && identity.pid == pid,
+        "unowned IPC host/PID",
+    )
 }
 
 impl Registration {
@@ -106,20 +155,7 @@ impl Registration {
             properties.relates_to == Default::default(),
             "unexpected correlated app reply",
         )?;
-        let identities: Vec<_> = message
-            .headers
-            .iter()
-            .filter(|h| h.id == wire::IPC_HEADER)
-            .collect();
-        require(
-            identities.len() == 1,
-            "IPC message must have one identity header",
-        )?;
-        let identity: wire::IpcIdentity = from_slice(&identities[0].value)?;
-        require(
-            identity.host == host && identity.pid == pid,
-            "unowned IPC host/PID",
-        )?;
+        validate_ipc(&message, host, pid)?;
         require(
             properties.expects_reply,
             "unsupported one-way application traffic",
@@ -236,6 +272,7 @@ impl Registration {
                     "unknown host unregister",
                 )?;
                 self.finished = false;
+                self.started = false;
                 self.runtime = None;
                 self.registered_type = false;
                 to_vec(&wire::ErrorReply { error: 0 })?
@@ -252,8 +289,51 @@ impl Registration {
     }
 }
 
-/// Run only the native registration feasibility gate, not a simulated peer.
-pub fn bootstrap(options: Options) -> Result<()> {
+fn pump(
+    state: &mut Registration,
+    session: &mut ipc::Session,
+    child: &mut process::OwnedApp,
+    host: &str,
+    bundle: &deployment::Deployment,
+    unit: Option<&mut controller::ServiceUnit>,
+    deadline: Instant,
+) -> Result<()> {
+    child.check_alive()?;
+    require(
+        Instant::now() < deadline,
+        "native operation deadline exceeded; remote outcome uncertain until cleanup",
+    )?;
+    match session.incoming.recv_timeout(Duration::from_millis(50)) {
+        Ok(message) => {
+            let message = message?;
+            let properties = message.properties()?;
+            if properties.actor == 12 {
+                validate_ipc(&message, host, child.pid())?;
+                require(
+                    state.registered_type,
+                    "lifecycle reply without active runtime/type",
+                )?;
+                let unit = unit.ok_or_else(|| HostError("unsolicited lifecycle traffic".into()))?;
+                unit.accept(&message)?;
+                println!(
+                    "MSSF_HOST {}",
+                    json!({"event":"semantic_reply", "action":properties.action,
+                    "partition":uuid::Uuid::from_bytes_le(unit.request.unit.id.id.0).to_string(),
+                    "instance":unit.request.local.instance, "flags":unit.request.flags,
+                    "endpoint":unit.request.local.service_endpoint})
+                );
+                Ok(())
+            } else {
+                state.dispatch(message, session, host, child.pid(), bundle)
+            }
+        }
+        Err(RecvTimeoutError::Timeout) => Ok(()),
+        Err(RecvTimeoutError::Disconnected) => Err(HostError("native IPC reader stopped".into())),
+    }
+}
+
+/// Execute a real native-runtime scenario; this never substitutes a model peer.
+pub fn run(options: Options, scenario: Scenario) -> Result<RunReport> {
     deployment::preflight(&options.native_directory, &options.executable)?;
     let bundle = deployment::Deployment::create(&options.run_parent, &options.executable)?;
     let listener = TcpListener::bind("127.0.0.1:0")?;
@@ -273,6 +353,8 @@ pub fn bootstrap(options: Options) -> Result<()> {
         "profile":"linux-x86_64-11.8.121.4-loopback-clear", "root":bundle.root, "ipc":address})
     );
     let deadline = Instant::now() + Duration::from_secs(120);
+    let mut endpoint = None;
+    let mut runtime_id = String::new();
     let outcome = (|| -> Result<()> {
         let stream = loop {
             child.check_alive()?;
@@ -295,21 +377,22 @@ pub fn bootstrap(options: Options) -> Result<()> {
         let mut session = ipc::Session::new(stream, address)?;
         let mut state = Registration::default();
         loop {
-            child.check_alive()?;
-            require(
-                Instant::now() < deadline,
-                "native bootstrap deadline exceeded",
+            pump(
+                &mut state,
+                &mut session,
+                &mut child,
+                &host,
+                &bundle,
+                None,
+                deadline,
             )?;
-            match session.incoming.recv_timeout(Duration::from_millis(50)) {
-                Ok(message) => {
-                    state.dispatch(message?, &mut session, &host, child.pid(), &bundle)?
-                }
-                Err(RecvTimeoutError::Timeout) => {}
-                Err(RecvTimeoutError::Disconnected) => {
-                    return Err(HostError("native IPC reader stopped".into()))
-                }
-            }
-            if state.registered_type && state.lease_polls > 0 {
+            if state.registered_type
+                && state.lease_polls > 0
+                && child
+                    .callbacks()
+                    .iter()
+                    .any(|e| e["event"] == "type_registered")
+            {
                 println!(
                     "MSSF_HOST {}",
                     json!({"event":"bootstrap_passed", "lease_polls":state.lease_polls})
@@ -317,22 +400,62 @@ pub fn bootstrap(options: Options) -> Result<()> {
                 break;
             }
         }
+        let runtime = state.runtime.as_ref().unwrap();
+        runtime_id = runtime.id.clone();
+        if scenario != Scenario::Bootstrap {
+            let mut unit = controller::ServiceUnit::new(runtime);
+            unit.open(&mut session)?;
+            while unit.state != controller::UnitState::Open {
+                pump(
+                    &mut state,
+                    &mut session,
+                    &mut child,
+                    &host,
+                    &bundle,
+                    Some(&mut unit),
+                    deadline,
+                )?;
+            }
+            let address = unit.request.local.service_endpoint.clone();
+            controller::ping(&address)?;
+            println!(
+                "MSSF_HOST {}",
+                json!({"event":"ping_passed","endpoint":address})
+            );
+            unit.close(&mut session, scenario == Scenario::Abort)?;
+            while unit.state != controller::UnitState::Closed {
+                pump(
+                    &mut state,
+                    &mut session,
+                    &mut child,
+                    &host,
+                    &bundle,
+                    Some(&mut unit),
+                    deadline,
+                )?;
+            }
+            controller::stopped(&address)?;
+            child.check_alive()?;
+            println!(
+                "MSSF_HOST {}",
+                json!({"event":"endpoint_stopped","process_still_alive":true,"scenario":scenario})
+            );
+            endpoint = Some(address);
+        }
+        if scenario == Scenario::Abort {
+            return Ok(());
+        }
         child.command(b"shutdown\n")?;
         while state.runtime.is_some() {
-            child.check_alive()?;
-            require(
-                Instant::now() < deadline,
-                "runtime unregister deadline exceeded",
+            pump(
+                &mut state,
+                &mut session,
+                &mut child,
+                &host,
+                &bundle,
+                None,
+                deadline,
             )?;
-            match session.incoming.recv_timeout(Duration::from_millis(50)) {
-                Ok(message) => {
-                    state.dispatch(message?, &mut session, &host, child.pid(), &bundle)?
-                }
-                Err(RecvTimeoutError::Timeout) => {}
-                Err(RecvTimeoutError::Disconnected) => {
-                    return Err(HostError("IPC stopped before runtime unregister".into()))
-                }
-            }
         }
         child.command(b"exit\n")?;
         child.wait_exit(Instant::now() + Duration::from_secs(5))?;
@@ -346,6 +469,55 @@ pub fn bootstrap(options: Options) -> Result<()> {
         "MSSF_HOST {}",
         json!({"event":"cleanup", "result":cleanup.as_ref().map_err(ToString::to_string)})
     );
-    cleanup?;
-    outcome
+    let cleanup = cleanup?;
+    outcome?;
+    let callbacks = child.callbacks();
+    if scenario != Scenario::Bootstrap {
+        for event in [
+            "create",
+            "open",
+            if scenario == Scenario::Abort {
+                "abort"
+            } else {
+                "close"
+            },
+        ] {
+            require(
+                callbacks.iter().filter(|e| e["event"] == event).count() == 1,
+                &format!("native app must observe exactly one {event} callback"),
+            )?;
+        }
+        let other = if scenario == Scenario::Abort {
+            "close"
+        } else {
+            "abort"
+        };
+        require(
+            !callbacks.iter().any(|e| e["event"] == other),
+            "unexpected opposite terminal callback",
+        )?;
+        let created = callbacks.iter().find(|e| e["event"] == "create").unwrap();
+        require(
+            created["type"] == wire::SERVICE_TYPE
+                && created["instance"] == 1
+                && created["initialization"] == json!(b"native-test-host"),
+            "native factory arguments mismatch",
+        )?;
+        require(
+            callbacks.iter().any(|e| {
+                e["event"] == "open"
+                    && e["partition_kind"] == "singleton"
+                    && Some(e["endpoint"].as_str().unwrap_or("")) == endpoint.as_deref()
+            }),
+            "Open callback endpoint/context differs from native semantic reply",
+        )?;
+    }
+    Ok(RunReport {
+        scenario,
+        pid: child.pid(),
+        runtime_id,
+        endpoint,
+        callbacks,
+        cleanup,
+    })
 }

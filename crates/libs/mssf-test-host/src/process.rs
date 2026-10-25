@@ -1,11 +1,14 @@
 #[cfg(unix)]
-use std::os::unix::process::CommandExt;
+use std::os::{fd::AsRawFd, unix::process::CommandExt};
 use std::{
     collections::VecDeque,
     io::{Read, Write},
     path::Path,
     process::{Child, Command, Stdio},
-    sync::{Arc, Mutex},
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc, Mutex,
+    },
     thread::{self, JoinHandle},
     time::{Duration, Instant},
 };
@@ -18,17 +21,31 @@ pub struct OwnedApp {
     logs: Arc<Mutex<VecDeque<String>>>,
     readers: Vec<JoinHandle<()>>,
     reaped: bool,
+    stop_logs: Arc<AtomicBool>,
 }
 
 fn capture(
     input: impl Read + Send + 'static,
     logs: Arc<Mutex<VecDeque<String>>>,
+    stop: Arc<AtomicBool>,
 ) -> JoinHandle<()> {
     thread::spawn(move || {
         let mut input = input;
         let mut chunk = [0; 4096];
         let mut tail = Vec::new();
-        while let Ok(count) = input.read(&mut chunk) {
+        loop {
+            let count = match input.read(&mut chunk) {
+                Ok(count) => count,
+                Err(error) if error.kind() == std::io::ErrorKind::Interrupted => continue,
+                Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                    if stop.load(Ordering::Acquire) {
+                        break;
+                    }
+                    thread::sleep(Duration::from_millis(5));
+                    continue;
+                }
+                Err(_) => break,
+            };
             if count == 0 {
                 break;
             }
@@ -50,9 +67,14 @@ fn capture(
             }
         }
         if !tail.is_empty() {
-            logs.lock()
-                .unwrap()
-                .push_back(String::from_utf8_lossy(&tail).into_owned());
+            let mut logs = logs.lock().unwrap();
+            let line = String::from_utf8_lossy(&tail).into_owned();
+            while logs.len() >= 4096
+                || logs.iter().map(String::len).sum::<usize>() + line.len() > LOG_LIMIT
+            {
+                logs.pop_front();
+            }
+            logs.push_back(line);
         }
     })
 }
@@ -128,16 +150,31 @@ impl OwnedApp {
             }
         }
         let mut child = command.spawn()?;
+        let stdout = child.stdout.take().unwrap();
+        let stderr = child.stderr.take().unwrap();
+        #[cfg(unix)]
+        for fd in [stdout.as_raw_fd(), stderr.as_raw_fd()] {
+            let flags = unsafe { libc::fcntl(fd, libc::F_GETFL) };
+            if flags < 0 || unsafe { libc::fcntl(fd, libc::F_SETFL, flags | libc::O_NONBLOCK) } < 0
+            {
+                let error = std::io::Error::last_os_error();
+                let _ = child.kill();
+                let _ = child.wait();
+                return Err(error.into());
+            }
+        }
         let logs = Arc::new(Mutex::new(VecDeque::new()));
+        let stop_logs = Arc::new(AtomicBool::new(false));
         let readers = vec![
-            capture(child.stdout.take().unwrap(), logs.clone()),
-            capture(child.stderr.take().unwrap(), logs.clone()),
+            capture(stdout, logs.clone(), stop_logs.clone()),
+            capture(stderr, logs.clone(), stop_logs.clone()),
         ];
         Ok(Self {
             child,
             logs,
             readers,
             reaped: false,
+            stop_logs,
         })
     }
 
@@ -147,6 +184,16 @@ impl OwnedApp {
 
     pub fn logs(&self) -> Vec<String> {
         self.logs.lock().unwrap().iter().cloned().collect()
+    }
+
+    pub fn callbacks(&self) -> Vec<serde_json::Value> {
+        self.logs()
+            .iter()
+            .filter_map(|line| {
+                line.find("MSSF_APP ")
+                    .and_then(|start| serde_json::from_str(&line[start + 9..]).ok())
+            })
+            .collect()
     }
 
     pub fn check_alive(&mut self) -> Result<()> {
@@ -198,6 +245,7 @@ impl OwnedApp {
         loop {
             if let Some(status) = self.child.try_wait()? {
                 self.reaped = true;
+                self.stop_logs.store(true, Ordering::Release);
                 for reader in self.readers.drain(..) {
                     let _ = reader.join();
                 }
@@ -214,6 +262,7 @@ impl OwnedApp {
 
 impl Drop for OwnedApp {
     fn drop(&mut self) {
+        self.stop_logs.store(true, Ordering::Release);
         if !self.reaped {
             #[cfg(unix)]
             unsafe {
@@ -243,6 +292,7 @@ mod tests {
             logs: Arc::default(),
             readers: vec![],
             reaped: false,
+            stop_logs: Arc::default(),
         };
         let result = owned.cleanup().unwrap();
         assert_eq!(result["forced"], true);
@@ -259,6 +309,7 @@ mod tests {
             logs: Arc::default(),
             readers: vec![],
             reaped: false,
+            stop_logs: Arc::default(),
         };
         assert!(owned
             .wait_exit(Instant::now() + Duration::from_secs(2))
