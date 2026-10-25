@@ -252,6 +252,14 @@ impl Package {
                 !value.contains(['[', ']']),
                 "override must be a nonrecursive literal",
             )?;
+            require(
+                value.chars().all(|c| {
+                    matches!(c,
+                    '\u{9}' | '\u{a}' | '\u{d}' | '\u{20}'..='\u{d7ff}'
+                    | '\u{e000}'..='\u{fffd}' | '\u{10000}'..='\u{10ffff}')
+                }),
+                "override contains an XML 1.0-invalid character",
+            )?;
             params.insert(name.clone(), value.clone());
         }
         let application_type = id_attr(app, "ApplicationTypeName", &params)?;
@@ -338,6 +346,18 @@ impl Package {
         shape(code, "CodePackage", &["Name", "Version"], &["EntryPoint"])?;
         let code_name = id_attr(code, "Name", &params)?;
         let code_version = id_attr(code, "Version", &params)?;
+        for component in [
+            format!("{application_type}_App1"),
+            format!("{service_manifest}.{code_name}.{code_version}"),
+            format!("{service_manifest}.Manifest.{manifest_version}.xml"),
+            format!("{service_manifest}.Package.Current.xml"),
+            format!("{service_manifest}.Endpoints.txt"),
+        ] {
+            require(
+                component.len() <= 255,
+                "composed native package filename exceeds 255 bytes",
+            )?;
+        }
         let entry = one(code, "EntryPoint")?;
         shape(entry, "EntryPoint", &[], &["ExeHost"])?;
         let exe = one(entry, "ExeHost")?;

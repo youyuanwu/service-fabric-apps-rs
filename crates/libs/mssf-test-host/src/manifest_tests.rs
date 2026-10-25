@@ -41,6 +41,20 @@ impl Drop for Fixture {
 #[test]
 fn defaults_overrides_and_native_layout_are_not_fixture_constants() {
     let fixture = Fixture::new();
+    fs::write(
+        fixture.0.join("OtherPackage/Bin/bin/auxiliary.dat"),
+        b"nested content",
+    )
+    .unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(
+            fixture.0.join("OtherPackage/Bin/bin/auxiliary.dat"),
+            fs::Permissions::from_mode(0o640),
+        )
+        .unwrap();
+    }
     let defaults = fixture.load(&[]).unwrap();
     assert_eq!(defaults.service_name, "Default");
     assert_eq!(defaults.application_version, "v2");
@@ -60,6 +74,22 @@ fn defaults_overrides_and_native_layout_are_not_fixture_constants() {
     assert_eq!(package.endpoint_file().split(';').count(), 9);
     let bundle = Deployment::from_manifest(&std::env::temp_dir(), &package).unwrap();
     assert!(bundle.executable.is_file());
+    assert_eq!(
+        fs::read(bundle.code.join("bin/auxiliary.dat")).unwrap(),
+        b"nested content"
+    );
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        assert_eq!(
+            fs::metadata(bundle.code.join("bin/auxiliary.dat"))
+                .unwrap()
+                .permissions()
+                .mode()
+                & 0o777,
+            0o640
+        );
+    }
     assert_eq!(bundle.arguments, ["a<b", "c>d"]);
     assert_eq!(bundle.identity.code.package.package.name, "OtherPackage");
     assert_eq!(bundle.identity.application_name, "fabric:/Another/NamedApp");
@@ -87,6 +117,15 @@ fn defaults_overrides_and_native_layout_are_not_fixture_constants() {
                         .unwrap()
                         .text(),
                     Some("a<b c>d")
+                );
+                assert_eq!(parsed.root_element().attribute("Version"), Some("v3"));
+                assert_eq!(
+                    parsed
+                        .descendants()
+                        .find(|n| n.has_tag_name((NS, "CodePackage")))
+                        .unwrap()
+                        .attribute("Version"),
+                    Some("v4")
                 );
             }
         }
@@ -193,6 +232,10 @@ fn parameters_and_arguments_are_strict_and_bounded() {
         vec![("Args".into(), "a\\b".into())],
         vec![("Args".into(), "a\u{00a0}b".into())],
         vec![("Args".into(), "\0".into())],
+        vec![("Args".into(), "\u{c}".into())],
+        vec![("Args".into(), "\u{b}".into())],
+        vec![("Args".into(), "\u{fffe}".into())],
+        vec![("Args".into(), "\u{ffff}".into())],
         vec![("Args".into(), "a".repeat(16385))],
         vec![("Args".into(), "a ".repeat(129))],
     ] {
@@ -256,4 +299,22 @@ fn symlinks_are_rejected_in_manifests_code_and_directories() {
     fs::rename(&manifest, manifest.with_extension("real")).unwrap();
     symlink(manifest.with_extension("real"), &manifest).unwrap();
     assert!(fixture.load(&[]).is_err());
+}
+
+#[test]
+fn composed_native_filenames_are_validated_before_materialization() {
+    let fixture = Fixture::new();
+    let long = "a".repeat(128);
+    // The individual identifier is valid, but the native layout component is not.
+    identifier(&long).unwrap();
+    fixture.write(
+        &APP.replace("OtherPackage", &long).replace("v3", &long),
+        &SERVICE.replace("OtherPackage", &long).replace("v3", &long),
+    );
+    fs::rename(fixture.0.join("OtherPackage"), fixture.0.join(&long)).unwrap();
+    assert!(fixture
+        .load(&[])
+        .unwrap_err()
+        .0
+        .contains("composed native package filename"));
 }
