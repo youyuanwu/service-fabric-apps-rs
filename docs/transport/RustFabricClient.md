@@ -1600,8 +1600,15 @@ It requires a new disposable onebox, an explicit absolute
 `MSSF_TEST_ARCHIVE_SHA256`. The profile contains `profile` (`clear`),
 `allocation`, exact controller `allocation_owner`, `endpoint`, `runtime`,
 workload `owner`, and absolute fresh `journal`/`report` paths. The allocation's
-private state must match owner/name/runtime and be ready. See the
-[CI profile generation](../../.github/workflows/ci.yaml) for a complete example.
+private state must match owner/name/runtime and be ready.
+The [Rust fixture setup](../../crates/libs/mssf-client/tests/support/notification_setup.rs)
+can generate a new profile when `MSSF_NOTIFICATION_ALLOCATION` explicitly names
+the owned allocation and `MSSF_NOTIFICATION_JOURNAL`/`MSSF_NOTIFICATION_REPORT`
+provide absolute fresh output paths. It reads the allocation's actual owner and
+runtime, validates every ownership/readiness gate, and refuses to overwrite an
+existing profile or evidence. CI supplies only these environment inputs, not
+an inline configuration generator. Leave `MSSF_NOTIFICATION_ALLOCATION` unset
+to use an existing explicit JSON profile with the same validation.
 Never select these mutating fixture tests against a shared or pre-existing
 allocation that you do not exclusively own.
 
@@ -1609,7 +1616,11 @@ allocation that you do not exclusively own.
 cargo nextest archive --locked -p mssf-transport -p mssf-client \
   --archive-file build/native-client-tests.tar.zst
 export MSSF_TEST_ARCHIVE_SHA256="$(sha256sum build/native-client-tests.tar.zst | cut -d ' ' -f 1)"
+mkdir -p build/notification-evidence
 export MSSF_NOTIFICATION_CONFIG="$PWD/build/notification-evidence/config.json"
+export MSSF_NOTIFICATION_ALLOCATION=your-new-owned-onebox
+export MSSF_NOTIFICATION_JOURNAL="$PWD/build/notification-evidence/journal.json"
+export MSSF_NOTIFICATION_REPORT="$PWD/build/notification-evidence/report.json"
 export MSSF_LIST_OWNER=your-exact-workload-owner
 cargo nextest run --archive-file build/native-client-tests.tar.zst \
   --run-ignored only -E 'test(onebox_resolution_and_notifications)' --no-tests fail

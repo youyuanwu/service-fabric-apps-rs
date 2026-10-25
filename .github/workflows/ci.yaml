@@ -205,27 +205,6 @@ jobs:
     - name: Check fresh cluster health
       run: python3 "$CLUSTER_CTL" status "$CLUSTER_NAME" > "$RUNNER_TEMP/linux-cluster-status-created.json"
 
-    - name: Configure owned native notification qualification
-      if: matrix.topology == 'onebox'
-      run: |
-        python3 -c '
-        import json, os
-        from pathlib import Path
-        root = Path(os.environ["GITHUB_WORKSPACE"])
-        scratch = Path(os.environ["RUNNER_TEMP"])
-        allocation = os.environ["CLUSTER_NAME"]
-        state = json.loads((root / "build/oneboxes" / allocation / "state.json").read_text())
-        config = {
-          "profile": "clear", "allocation": allocation,
-          "allocation_owner": state["owner"],
-          "endpoint": "127.0.0.1:19000", "runtime": state["runtime_version"],
-          "owner": allocation,
-          "journal": str(scratch / "native-notification-journal.json"),
-          "report": str(scratch / "native-notification-report.json"),
-        }
-        (scratch / "native-notification-config.json").write_text(json.dumps(config))
-        '
-
     - name: Exercise real native reads, health, lists and owned fixtures
       id: native_client
       if: matrix.topology == 'onebox'
@@ -248,6 +227,9 @@ jobs:
         MSSF_LIST_REPORT: ${{ runner.temp }}/native-list-report.json
         MSSF_LIST_OWNER: ci-${{ github.run_id }}-${{ github.run_attempt }}
         MSSF_NOTIFICATION_CONFIG: ${{ runner.temp }}/native-notification-config.json
+        MSSF_NOTIFICATION_ALLOCATION: ${{ env.CLUSTER_NAME }}
+        MSSF_NOTIFICATION_JOURNAL: ${{ runner.temp }}/native-notification-journal.json
+        MSSF_NOTIFICATION_REPORT: ${{ runner.temp }}/native-notification-report.json
 
     - name: Upload successful native client evidence
       if: matrix.topology == 'onebox' && steps.native_client.outcome == 'success'
@@ -259,6 +241,7 @@ jobs:
           ${{ runner.temp }}/native-health-report.json
           ${{ runner.temp }}/native-name-report.json
           ${{ runner.temp }}/native-list-report.json
+          ${{ runner.temp }}/native-notification-report.json
         if-no-files-found: error
         retention-days: 7
 

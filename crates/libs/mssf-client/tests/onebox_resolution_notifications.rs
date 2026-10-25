@@ -1,11 +1,7 @@
 //! Real native clear-TCP qualification on an explicitly owned disposable onebox.
 use mssf_client::*;
-use serde::Deserialize;
 use serde_json::{json, Value};
-use std::{
-    path::{Path, PathBuf},
-    time::Duration,
-};
+use std::time::Duration;
 
 #[path = "support/fixture.rs"]
 mod fixture;
@@ -17,67 +13,10 @@ mod loss_proxy;
 mod oracle;
 #[path = "support/rest.rs"]
 mod rest;
+#[path = "support/notification_setup.rs"]
+mod setup;
 use oracle::{Http, Journal, Result};
-
-#[derive(Clone, Deserialize)]
-#[serde(deny_unknown_fields)]
-struct Config {
-    profile: String,
-    allocation: String,
-    allocation_owner: String,
-    endpoint: std::net::SocketAddr,
-    runtime: String,
-    owner: String,
-    journal: PathBuf,
-    report: PathBuf,
-}
-fn config() -> Result<Config> {
-    let path = oracle::output("MSSF_NOTIFICATION_CONFIG")?;
-    if !path.is_absolute() {
-        return Err("explicit absolute notification profile required".into());
-    }
-    let config: Config = serde_json::from_slice(&std::fs::read(&path)?)?;
-    if config.owner != oracle::owner()? {
-        return Err("explicit exact workload owner mismatch".into());
-    }
-    if config.profile != "clear"
-        || !config.endpoint.ip().is_loopback()
-        || config.endpoint.port() != 19000
-    {
-        return Err("test requires explicitly selected loopback clear profile".into());
-    }
-    if config.allocation.is_empty()
-        || !config
-            .allocation
-            .bytes()
-            .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-')
-        || config.journal == config.report
-        || config.report.exists()
-        || config.journal.exists()
-        || [&config.journal, &config.report]
-            .iter()
-            .any(|p| !p.is_absolute() || !p.parent().is_some_and(Path::is_dir))
-    {
-        return Err("requires fresh report/journal and task-owned allocation".into());
-    }
-    // Cargo/nextest execute from the package cwd, including workspace-remapped
-    // archive consumers. Do not bake the producer's absolute checkout into this gate.
-    let root = std::env::current_dir()?.join("../../..");
-    let state: Value = serde_json::from_slice(&std::fs::read(
-        root.join("build/oneboxes")
-            .join(&config.allocation)
-            .join("state.json"),
-    )?)?;
-    if state["name"] != config.allocation
-        || state["project"] != format!("sf-onebox-{}", config.allocation)
-        || state["owner"] != config.allocation_owner
-        || state["runtime_version"] != config.runtime
-        || state["phase"] != "ready"
-    {
-        return Err("allocation identity mismatch; refusing live mutations".into());
-    }
-    Ok(config)
-}
+use setup::Config;
 
 async fn update(
     client: &mut ServiceNotificationClient,
@@ -300,7 +239,7 @@ async fn scenario(config: Config, mut journal: Journal) -> Result<Value> {
 #[tokio::test]
 #[ignore = "requires explicit MSSF_NOTIFICATION_CONFIG for a new task-owned disposable onebox"]
 async fn onebox_resolution_and_notifications() -> Result<()> {
-    let config = config()?;
+    let config = setup::config()?;
     let archive = std::env::var("MSSF_TEST_ARCHIVE_SHA256")?;
     let journal = Journal::new(config.owner.clone(), archive.clone())?;
     journal.reserve(&config.journal)?;
