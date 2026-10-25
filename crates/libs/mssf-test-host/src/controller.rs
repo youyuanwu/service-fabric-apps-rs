@@ -198,7 +198,14 @@ pub fn ping(endpoint: &str) -> Result<()> {
 }
 
 pub fn stopped(endpoint: &str) -> Result<()> {
-    match TcpStream::connect_timeout(&validate_endpoint(endpoint)?, Duration::from_secs(1)) {
+    require_connection_refused(TcpStream::connect_timeout(
+        &validate_endpoint(endpoint)?,
+        Duration::from_secs(1),
+    ))
+}
+
+fn require_connection_refused(connection: std::io::Result<TcpStream>) -> Result<()> {
+    match connection {
         Err(error) if error.kind() == std::io::ErrorKind::ConnectionRefused => Ok(()),
         Err(error) => Err(HostError(format!("endpoint shutdown not proven: {error}"))),
         Ok(_) => Err(HostError(
@@ -295,30 +302,37 @@ mod tests {
     }
 
     #[test]
-    fn probe_rejects_nonloopback_and_shutdown_requires_connection_refused() {
+    fn probe_rejects_nonloopback_and_listening_endpoints() {
         assert!(validate_endpoint("10.0.0.1:1234").is_err());
         assert!(validate_endpoint("127.0.0.1:0").is_err());
         assert!(validate_endpoint("canned-success").is_err());
         let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
         let address = listener.local_addr().unwrap().to_string();
-        assert!(stopped(&address).is_err());
-        // Reserve a different port without listening. Dropping a listener and
-        // then probing its unowned port races reuse/inherited socket teardown.
-        let not_listening = socket2::Socket::new(
-            socket2::Domain::IPV4,
-            socket2::Type::STREAM,
-            Some(socket2::Protocol::TCP),
-        )
-        .unwrap();
-        not_listening
-            .bind(&"127.0.0.1:0".parse::<SocketAddr>().unwrap().into())
-            .unwrap();
-        let address = not_listening
-            .local_addr()
-            .unwrap()
-            .as_socket()
-            .unwrap()
-            .to_string();
-        stopped(&address).unwrap();
+        assert!(stopped(&address)
+            .unwrap_err()
+            .0
+            .contains("endpoint still accepting connections"));
+    }
+
+    #[test]
+    fn shutdown_requires_connection_refused_not_timeout_or_other_errors() {
+        use std::io::ErrorKind;
+
+        // Error classification is independent of OS loopback retry timing.
+        require_connection_refused(Err(ErrorKind::ConnectionRefused.into())).unwrap();
+        for kind in [
+            ErrorKind::TimedOut,
+            ErrorKind::WouldBlock,
+            ErrorKind::ConnectionReset,
+            ErrorKind::PermissionDenied,
+            ErrorKind::NotConnected,
+            ErrorKind::Interrupted,
+            ErrorKind::Other,
+        ] {
+            assert!(require_connection_refused(Err(kind.into()))
+                .unwrap_err()
+                .0
+                .starts_with("endpoint shutdown not proven:"));
+        }
     }
 }
