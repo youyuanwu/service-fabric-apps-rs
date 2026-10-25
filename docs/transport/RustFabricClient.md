@@ -1259,6 +1259,13 @@ There are no committed golden packet hex files or normalized capture snapshots.
 Native compatibility claims require the self-contained live scenarios below
 to pass against the real onebox.
 
+Handwritten payloads in the offline model peers check field order separately
+from production DTO serialization, but still use the same low-level Rust codec.
+Keep these distinct schema assertions and targeted malformed-input, allocation,
+ACK, cancellation, and race cases. Share generic framing helpers and consolidate
+duplicate code tables rather than replacing expectations with production DTOs
+or counting round trips as native evidence.
+
 The native Serde migration was qualified with independent old/manual-versus-new
 encoded-byte comparisons for every migrated encoder family, malformed and
 missing-versus-truncated suffix regressions, exact/over-bound adapter tests,
