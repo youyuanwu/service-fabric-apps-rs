@@ -13,7 +13,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use crate::{deployment::Deployment, wire, HostError, Result};
+use crate::{deployment::Deployment, HostError, Result};
 
 const LOG_LIMIT: usize = 1024 * 1024;
 pub struct OwnedApp {
@@ -87,8 +87,11 @@ impl OwnedApp {
         host: &str,
         address: &str,
     ) -> Result<Self> {
-        let mut command = Command::new(bundle.code.join("stateless-test-app"));
+        let identity = &bundle.identity;
+        let package = &identity.code.package.package;
+        let mut command = Command::new(&bundle.executable);
         command
+            .args(&bundle.arguments)
             .env_clear()
             .env("PATH", "/usr/bin:/bin")
             .env("HOME", &bundle.root)
@@ -98,14 +101,7 @@ impl OwnedApp {
             )
             .env("FabricConfigFileName", &bundle.config)
             .env("FabricDataRoot", bundle.root.join("native-data"))
-            .env(
-                "FabricLogRoot",
-                bundle
-                    .root
-                    .join("deployment")
-                    .join(wire::APP_ID)
-                    .join("log"),
-            )
+            .env("FabricLogRoot", bundle.application.join("log"))
             .env("FabricCodePath", native)
             .env("Fabric_ApplicationHostId", host)
             .env("Fabric_ApplicationHostType", "Activated_SingleCodePackage")
@@ -113,15 +109,21 @@ impl OwnedApp {
             .env("Fabric_IsCodePackageActivatorHost", "false")
             .env("Fabric_RuntimeConnectionAddress", address)
             .env("Fabric_RuntimeConnectionUseSsl", "false")
-            .env("Fabric_ApplicationId", wire::APP_ID)
-            .env("Fabric_ApplicationName", wire::APP_NAME)
-            .env("Fabric_ServicePackageName", wire::PACKAGE)
-            .env("Fabric_CodePackageName", wire::CODE)
+            .env(
+                "Fabric_ApplicationId",
+                format!(
+                    "{}_App{}",
+                    package.application.kind, package.application.number
+                ),
+            )
+            .env("Fabric_ApplicationName", &identity.application_name)
+            .env("Fabric_ServicePackageName", &package.name)
+            .env("Fabric_CodePackageName", &identity.code.name)
             .env("Fabric_CodePackageInstanceSeqNum", "1")
             .env("Fabric_ServicePackageInstanceSeqNum", "1")
             .env("Fabric_ServicePackageVersionInstance", "1.0:1.0:1")
             .env("Fabric_ServicePackageActivationId", "")
-            .current_dir(&bundle.code)
+            .current_dir(&bundle.working_directory)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
@@ -315,5 +317,55 @@ mod tests {
             .wait_exit(Instant::now() + Duration::from_secs(2))
             .is_err());
         assert_eq!(owned.cleanup().unwrap()["reaped"], true);
+    }
+
+    #[test]
+    fn expired_protocol_admission_and_caller_failure_still_reap_owned_app() {
+        let child = Command::new("/bin/sleep")
+            .arg("30")
+            .process_group(0)
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .unwrap();
+        let mut owned = OwnedApp {
+            child,
+            logs: Arc::default(),
+            readers: vec![],
+            reaped: false,
+            stop_logs: Arc::default(),
+        };
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let _peer = std::net::TcpStream::connect(listener.local_addr().unwrap()).unwrap();
+        let (socket, _) = listener.accept().unwrap();
+        let mut session =
+            crate::ipc::Session::new(socket, listener.local_addr().unwrap().to_string()).unwrap();
+        let bundle =
+            Deployment::create(&std::env::temp_dir(), &std::env::current_exe().unwrap()).unwrap();
+        let mut state = crate::Registration::default();
+        let error = crate::pump(
+            &mut state,
+            &mut session,
+            &mut owned,
+            "owned",
+            &bundle,
+            None,
+            Instant::now() - Duration::from_secs(1),
+        )
+        .unwrap_err();
+        assert!(error.0.contains("native operation deadline"));
+        let outcome = crate::observe(
+            &mut |_| Err(HostError("caller failed".into())),
+            crate::LifecycleStage::Opened,
+            "opaque",
+            owned.pid(),
+            Instant::now() + Duration::from_secs(1),
+        );
+        let result = crate::complete(outcome, owned.cleanup()).unwrap_err();
+        assert_eq!(result.0, "caller failed");
+        assert_eq!(unsafe { libc::kill(owned.pid() as i32, 0) }, -1);
+        drop(session);
+        std::fs::remove_dir_all(bundle.root).unwrap();
     }
 }
