@@ -8,7 +8,7 @@ Docker bridge, and three independent named data volumes. An administrative
 it is not an SF node. No SSH daemon is required.
 
 For five nodes sharing one Ubuntu container and a published native-client port,
-use the [single-container onebox](UbuntuOnebox.md). Its `just onebox` commands
+use the [single-container onebox in fube](https://github.com/youyuanwu/fube/blob/main/docs/UbuntuOnebox.md). Its `just onebox` commands
 mirror this lifecycle; both default profiles use host HTTP port 19080 and cannot
 run concurrently.
 
@@ -163,8 +163,8 @@ The `Linux cluster lifecycle` matrix entry in `.github/workflows/ci.yaml` runs s
 from the Windows build on every pull request and push to `main`. It uses an
 Ubuntu 24.04 x86-64 VM directly, builds the pinned Ubuntu 22.04 node image, and
 checks fresh creation/native baseline, health, retained-data down/up, resumed
-health, and a surviving synthetic naming-store entry. The onebox entry runs
-independently on another runner. Each entry has a
+health, and a surviving synthetic naming-store entry. Onebox and native-client
+CI now live in fube. The cluster job has a
 45-minute deadline and a unique cluster name per run/attempt.
 It does not run joins or application fault tests.
 
