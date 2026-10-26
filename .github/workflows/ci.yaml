@@ -84,6 +84,13 @@ jobs:
           dockerfile: docker/linux-cluster/Dockerfile
           context: docker/linux-cluster
           diagnostics-args: ""
+        - topology: onebox
+          controller: scripts/onebox_ctl.py
+          state-root: build/oneboxes
+          image: sf-apps-onebox:11.8.121.4
+          dockerfile: docker/onebox/Dockerfile
+          context: docker
+          diagnostics-args: "--onebox"
     permissions:
       contents: read
     env:

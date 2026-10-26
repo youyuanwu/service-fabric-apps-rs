@@ -273,16 +273,18 @@ print("stopped", flush=True)
         self.assertEqual(host.wait.call_count, 2)
         self.assertIn("FabricHost", stderr.write.call_args_list[0].args[0])
 
-    def test_shutdown_budget_fits_inside_cluster_compose_grace_period(self):
+    def test_shutdown_budget_fits_inside_both_compose_grace_periods(self):
         from linux_cluster import SHUTDOWN_TIMEOUT, generate
+        from onebox_ctl import generate as generate_onebox
 
         self.assertGreater(
             SHUTDOWN_TIMEOUT, self.node.HOST_SHUTDOWN_TIMEOUT + self.node.AUXILIARY_SHUTDOWN_TIMEOUT
         )
-        compose, _, _ = generate("test", "172.30.80.0/24", "image", "image", TEMPLATE)
-        for service in compose["services"].values():
-            if "stop_grace_period" in service:
-                self.assertEqual(service["stop_grace_period"], f"{SHUTDOWN_TIMEOUT}s")
+        for generator in (generate, generate_onebox):
+            compose, _, _ = generator("test", "172.30.80.0/24", "image", "image", TEMPLATE)
+            for service in compose["services"].values():
+                if "stop_grace_period" in service:
+                    self.assertEqual(service["stop_grace_period"], f"{SHUTDOWN_TIMEOUT}s")
 
     def test_auxiliary_shutdown_remains_bounded_and_reports_forced_termination(self):
         process = Mock()

@@ -6,11 +6,11 @@ Various service fabric rust apps.
 * [kvstore](crates\samples\kvstore) app using default SF key value store implementation in FabricRuntime.
 * [ext](crates\libs\mssf-ext) lib that extends mssf-core crate with various support including default replicator.
 
-The native-wire FabricClient, transport, standalone runtime test host, stateless
-acceptance fixture, and simple Linux onebox have moved to
+The native-wire FabricClient, transport, standalone runtime test host, and stateless
+acceptance fixture have moved to
 [fube](https://github.com/youyuanwu/fube), including their documentation, tests,
 scripts, and CI. This repository retains the apps, extension/replicator libraries,
-and multi-container cluster infrastructure.
+and both single-container onebox and multi-container cluster infrastructure.
 
 # Build
 Install Rust (using the toolchain pinned in `rust-toolchain.toml`), [just](https://just.systems), Python 3, and Protocol Buffers (`protoc`).
@@ -33,7 +33,8 @@ an existing debug build. Packaging uses only the Python standard library.
 ```
 
 # Documentation
-* [Client, runtime/host specifications and onebox](https://github.com/youyuanwu/fube#documentation) - maintained in fube.
+* [Client and runtime/host specifications](https://github.com/youyuanwu/fube#documentation) - maintained in fube.
+* [Ubuntu single-container onebox](docs/UbuntuOnebox.md) - five local nodes, retained-data lifecycle, and matching CI.
 * [Linux container-cluster lifecycle](docs/LinuxContainerCluster.md) - build, create, resume, inspect, stop, and explicitly destroy a local three-node cluster.
 * [Joining an existing Windows Service Fabric cluster](docs/WindowsClusterJoin.md) - standalone PowerShell workflow, source trace, security, and operational caveats.
 * [Linux multi-container cluster design](docs/LinuxContainerClusterDesign.md) - one node per Docker container, Windows orchestration adaptation, and dynamic-join validation gates.

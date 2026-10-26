@@ -8,7 +8,7 @@ Docker bridge, and three independent named data volumes. An administrative
 it is not an SF node. No SSH daemon is required.
 
 For five nodes sharing one Ubuntu container and a published native-client port,
-use the [single-container onebox in fube](https://github.com/youyuanwu/fube/blob/main/docs/UbuntuOnebox.md). Its `just onebox` commands
+use the [single-container onebox](UbuntuOnebox.md). Its `just onebox` commands
 mirror this lifecycle; both default profiles use host HTTP port 19080 and cannot
 run concurrently.
 
@@ -159,13 +159,15 @@ CLI release. The dynamic-join proof and full architecture are recorded in
 
 ## Continuous integration
 
-The `Linux cluster lifecycle` matrix entry in `.github/workflows/ci.yaml` runs separately
-from the Windows build on every pull request and push to `main`. It uses an
-Ubuntu 24.04 x86-64 VM directly, builds the pinned Ubuntu 22.04 node image, and
-checks fresh creation/native baseline, health, retained-data down/up, resumed
-health, and a surviving synthetic naming-store entry. Onebox and native-client
-CI now live in fube. The cluster job has a
-45-minute deadline and a unique cluster name per run/attempt.
+The `Linux cluster lifecycle` and `Linux onebox lifecycle` matrix entries in
+`.github/workflows/ci.yaml` run separately from the Windows build on every pull
+request and push to `main`. Each uses its own Ubuntu 24.04 x86-64 VM, builds the
+matching pinned Ubuntu 22.04 image, and checks fresh creation, health,
+retained-data down/up, resumed health, and a surviving synthetic naming-store
+entry. Only the multi-container entry establishes a native baseline.
+Native-client qualification remains in fube; these lifecycle jobs do not depend
+on Rust client builds or test archives. Each job has a 45-minute deadline and a
+unique cluster name per run/attempt.
 It does not run joins or application fault tests.
 
 Diagnostics and exact-name confirmed destruction are attempted with `always()`,
