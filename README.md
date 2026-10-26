@@ -5,7 +5,12 @@ Various service fabric rust apps.
 * [kvmap](crates\samples\kvmap) an key value store using SF default replicator. Still work in progress.
 * [kvstore](crates\samples\kvstore) app using default SF key value store implementation in FabricRuntime.
 * [ext](crates\libs\mssf-ext) lib that extends mssf-core crate with various support including default replicator.
-* [Native runtime test host](docs/runtime/RustTestHost.md#2-implemented-mvp-and-usage) runs a real stateless FabricRuntime app without a cluster, including a [narrow manifest-package profile](docs/runtime/ManifestTestHost.md) (experimental Linux loopback profile).
+
+The native-wire FabricClient, transport, standalone runtime test host, stateless
+acceptance fixture, and simple Linux onebox have moved to
+[fube](https://github.com/youyuanwu/fube), including their documentation, tests,
+scripts, and CI. This repository retains the apps, extension/replicator libraries,
+and multi-container cluster infrastructure.
 
 # Build
 Install Rust (using the toolchain pinned in `rust-toolchain.toml`), [just](https://just.systems), Python 3, and Protocol Buffers (`protoc`).
@@ -28,9 +33,7 @@ an existing debug build. Packaging uses only the Python standard library.
 ```
 
 # Documentation
-* [Runtime test tiers and CI](docs/runtime/RustTestHost.md#ci-test-tiers-and-diagnostics) - native-free regressions, standalone Linux native-library acceptance without a node, and full cluster tests.
-* [FabricRuntime architecture](docs/runtime/FabricRuntime.md), [node-side RA/Hosting](docs/runtime/FabricRuntimeHost.md), and the separate [pure Rust runtime design](docs/runtime/RustFabricRuntime.md).
-* [Ubuntu single-container onebox](docs/UbuntuOnebox.md) - five local nodes in one container, with retained lifecycle and localhost HTTP/native client gateways.
+* [Client, runtime/host specifications and onebox](https://github.com/youyuanwu/fube#documentation) - maintained in fube.
 * [Linux container-cluster lifecycle](docs/LinuxContainerCluster.md) - build, create, resume, inspect, stop, and explicitly destroy a local three-node cluster.
 * [Joining an existing Windows Service Fabric cluster](docs/WindowsClusterJoin.md) - standalone PowerShell workflow, source trace, security, and operational caveats.
 * [Linux multi-container cluster design](docs/LinuxContainerClusterDesign.md) - one node per Docker container, Windows orchestration adaptation, and dynamic-join validation gates.
