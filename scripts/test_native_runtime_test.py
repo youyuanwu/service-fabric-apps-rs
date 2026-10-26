@@ -141,7 +141,7 @@ class ManifestFixtureTests(unittest.TestCase):
             first = profile.manifest_fixture(fake_repo, root)
             second = profile.manifest_fixture(fake_repo, root)
             self.assertNotEqual(first, second)
-            self.assertEqual(sorted(str(p.relative_to(first)) for p in first.rglob("*") if p.is_file()),
+            self.assertEqual(sorted(p.relative_to(first).as_posix() for p in first.rglob("*") if p.is_file()),
                              ["ApplicationManifest.xml", "EchoPackage/Executables/native-echo",
                               "EchoPackage/ServiceManifest.xml"])
             copied = first / "EchoPackage/Executables/native-echo"
