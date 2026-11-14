@@ -54,8 +54,20 @@ jobs:
           throw "Could not locate MySQL libprotobuf.dll on PATH."
         }
         $mysqlBin = Split-Path -Parent $mysqlDll
-        Write-Host "Removing MySQL DLL directory: $mysqlBin"
-        Remove-Item -LiteralPath $mysqlBin -Recurse -Force
+        $pathEntries = $env:PATH -split ';' | Where-Object {
+          -not [string]::Equals(
+            $_.Trim().Trim('"').Replace('/', '\').TrimEnd('\'),
+            $mysqlBin.Replace('/', '\').TrimEnd('\'),
+            [StringComparison]::OrdinalIgnoreCase
+          )
+        }
+        $env:PATH = $pathEntries -join ';'
+        [System.IO.File]::AppendAllText(
+          $env:GITHUB_ENV,
+          "PATH=$env:PATH`n",
+          [System.Text.UTF8Encoding]::new($false)
+        )
+        Write-Host "Excluded MySQL DLL directory from PATH: $mysqlBin"
 
     - name: start sf cluster
       shell: pwsh
