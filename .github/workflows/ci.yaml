@@ -47,27 +47,14 @@ jobs:
     - name: Remove conflict dll paths
       shell: powershell
       run: |
-        $mysqlDll = where.exe libprotobuf.dll |
-          Where-Object { $_ -match '(?i)\\mysql[^\\]*\\' } |
-          Select-Object -First 1
-        if (-not $mysqlDll) {
-          throw "Could not locate MySQL libprotobuf.dll on PATH."
-        }
-        $mysqlBin = Split-Path -Parent $mysqlDll
-        $pathEntries = $env:PATH -split ';' | Where-Object {
-          -not [string]::Equals(
-            $_.Trim().Trim('"').Replace('/', '\').TrimEnd('\'),
-            $mysqlBin.Replace('/', '\').TrimEnd('\'),
-            [StringComparison]::OrdinalIgnoreCase
-          )
-        }
-        $env:PATH = $pathEntries -join ';'
-        [System.IO.File]::AppendAllText(
-          $env:GITHUB_ENV,
-          "PATH=$env:PATH`n",
-          [System.Text.UTF8Encoding]::new($false)
-        )
-        Write-Host "Excluded MySQL DLL directory from PATH: $mysqlBin"
+        Get-Command libprotobuf.dll -All |
+          Select-Object -ExpandProperty Source -Unique |
+          Where-Object { $_ -match '\\MySQL\\[^\\]+\\bin\\libprotobuf\.dll$' } |
+          ForEach-Object {
+            $mysqlBin = Split-Path -Parent $_
+            Write-Host "Removing conflicting MySQL DLL directory: $mysqlBin"
+            Remove-Item -LiteralPath $mysqlBin -Recurse -Force
+          }
 
     - name: start sf cluster
       shell: pwsh
