@@ -47,8 +47,14 @@ jobs:
     - name: Remove conflict dll paths
       shell: powershell
       run: |
-        get-command libprotobuf.dll | format-list
-        Remove-Item -Recurse -Force "C:\Program Files\MySQL\MySQL Server 8.0\bin"
+        Get-Command libprotobuf.dll -All |
+          Select-Object -ExpandProperty Source -Unique |
+          Where-Object { $_ -match '\\MySQL\\[^\\]+\\bin\\libprotobuf\.dll$' } |
+          ForEach-Object {
+            $mysqlBin = Split-Path -Parent $_
+            Write-Host "Removing conflicting MySQL DLL directory: $mysqlBin"
+            Remove-Item -LiteralPath $mysqlBin -Recurse -Force
+          }
 
     - name: start sf cluster
       shell: pwsh

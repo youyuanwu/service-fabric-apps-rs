@@ -10,7 +10,7 @@ mssf-pal.workspace = true
 trait-variant.workspace = true
 bytes.workspace = true
 tracing.workspace = true
-tokio.workspace = true
 
 [dev-dependencies]
 mssf-util.workspace = true
+tokio.workspace = true
